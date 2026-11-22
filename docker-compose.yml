@@ -4,6 +4,12 @@ services:
     image: krec-jumper
     container_name: krec-jumper
     ports:
-      # Im ganzen Netzwerk erreichbar. Nur lokal: "127.0.0.1:8085:80"
-      - "8085:80"
+      # Im ganzen Netzwerk erreichbar. Nur lokal: "127.0.0.1:8085:8080"
+      - "8085:8080"
+    volumes:
+      # Bestenliste (scores.json) – bleibt bei einem Neubau erhalten
+      - scores:/data
     restart: unless-stopped
+
+volumes:
+  scores:

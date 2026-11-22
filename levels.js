@@ -44,6 +44,7 @@ globalThis.KJ_LEVELS = [
       b.block(39, 14);
       b.ball(44, 15);
       b.block(47, 14);
+      b.sign(49, 15, 'In der Sitzpirouette LEERTASTE oder A: Waage – doppelte Punkte!');
       b.plat(50, 12, 4);
       b.stars(50, 11, 4);
       b.cone(54, 15);

@@ -26,3 +26,6 @@ dist-ssr
 # Lokale Hilfsdateien
 .~lock.*
 resume.sh
+
+# Bestenliste beim lokalen Start (node server.js)
+data/

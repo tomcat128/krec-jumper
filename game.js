@@ -12,13 +12,14 @@ const GRAVITY = 2300, JUMP_V = 780, JUMP_CUT = 280, MAX_FALL = 900;
 const MAX_RUN = 290, ACC_GROUND = 1500, ACC_AIR = 1050, ACC_TURN = 2600, FRICTION = 800;
 const COYOTE = 0.09, JUMP_BUF = 0.12;
 const AXEL_V = 380, AXEL_MIN_H = 45;                     // Axel: kleiner Auftrieb, erst ab 1,5 Kacheln über dem Boden
-const SPIN_MAX = 1.15, SPIN_MIN = 0.3, SPIN_CD = 0.4;
+const SPIN_MAX = 1.15, SPIN_MIN = 0.3, SPIN_CD = 0.4, WAAGE_COST = 1.5;   // die Waage verbraucht den Schwung anderthalbmal so schnell
 const PW = 20, PH = 54;
 const STEP = 1 / 120;
 const MAX_HEARTS = 3;
 
 const INK = '#2b1740';
 const LW = 480, LH = 270, PXS = 2, TPX = TILE / PXS;   // Pixelbild: 480×270, eine Kachel = 15 Pixel
+const HD = 2, SKATER_PX = 48 * HD;                       // Die Leinwand hat doppelt so viele Pixel: Die Welt bleibt grob, die Läuferin wird doppelt so fein gezeichnet
 
 const THEMES = {
   park: {
@@ -169,6 +170,7 @@ function tone(f0, f1, dur, type = 'square', vol = 0.05, delay = 0) {
 const SFX = {
   jump: () => tone(360, 840, 0.17, 'square', 0.04),
   axel: () => { tone(560, 1320, 0.2, 'triangle', 0.06); tone(1120, 2200, 0.22, 'sine', 0.03, 0.05); },
+  waage: () => { tone(440, 1320, 0.26, 'triangle', 0.07); tone(880, 1980, 0.26, 'sine', 0.03, 0.05); },
   spin: () => { tone(300, 950, 0.28, 'triangle', 0.07); tone(600, 1500, 0.28, 'sine', 0.03, 0.04); },
   stomp: () => { tone(240, 70, 0.14, 'square', 0.07); tone(700, 1100, 0.1, 'triangle', 0.05, 0.05); },
   hit: () => { tone(520, 160, 0.16, 'sawtooth', 0.05); tone(900, 1400, 0.1, 'triangle', 0.05, 0.06); },
@@ -321,17 +323,17 @@ const G = {
   state: 'title', stateT: 0, t: 0,
   levelIdx: 0, lvl: null, p: null, enemies: [], particles: [], popups: [],
   cam: 0, shake: 0, wipe: 0, toast: '', toastT: 0, hearts: MAX_HEARTS, score: 0, scoreAtStart: 0, best: 0,
-  time: 0, starsGot: 0, checkpoint: null, marks: [], bonus: 0, sparkT: 0, fin: null, stale: null, lockT: 0, zoom: 1, zoomDx: 0, zoomY: 0,
+  time: 0, starsGot: 0, checkpoint: null, marks: [], bonus: 0, sparkT: 0, menu: 0, hsAsked: false, fin: null, stale: null, lockT: 0, zoom: 1, zoomDx: 0, zoomY: 0,
 };
 
 function makePlayer(x, y) {
   return {
     x, y, w: PW, h: PH, vx: 0, vy: 0, onGround: false, hitWall: 0, facing: 1,
     coyote: 0, jumpBuf: 0, jumping: false, rotating: false, airRot: 0, axel: false, axelT: 0,
-    spinning: false, spinT: 0, spinCd: 0, spinLock: false, spinCombo: 0,
+    spinning: false, waage: false, spinT: 0, spinCd: 0, spinLock: false, spinCombo: 0,
     combo: 0, invuln: 0, stride: 0, dead: false, deadRot: 0,
     // nur für die Animation:
-    turnK: 0, sitK: 0, spinYaw: 0, airT: 0, landT: 1, hurtT: 1,
+    turnK: 0, sitK: 0, waK: 0, spinYaw: 0, airT: 0, landT: 1, hurtT: 1,
   };
 }
 
@@ -359,7 +361,7 @@ function startLevel(idx) {
   input.jumpPressed = false;
 }
 
-function setState(s) { G.state = s; G.stateT = 0; }
+function setState(s) { G.state = s; G.stateT = 0; if (s === 'pause') G.menu = 0; }
 
 function showTitle() {
   G.lvl = buildLevel(LEVEL_DEFS[0]);
@@ -376,7 +378,7 @@ function saveBest() {
 }
 
 // ───────────────────────── Spielerin ─────────────────────────
-function endSpin(p) { p.spinning = false; p.spinCd = SPIN_CD; }
+function endSpin(p) { p.spinning = false; p.waage = false; p.spinCd = SPIN_CD; }
 
 function stepPlayer(lvl, p, inp, dt) {
   const dir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
@@ -387,11 +389,11 @@ function stepPlayer(lvl, p, inp, dt) {
 
   // Sitzpirouette: am Boden starten, solange ↓ gehalten wird (maximal SPIN_MAX)
   if (p.spinning) {
-    p.spinT += dt;
+    p.spinT += dt * (p.waage ? WAAGE_COST : 1);
     if (p.spinT >= SPIN_MAX) { endSpin(p); p.spinLock = true; }
     else if (!inp.spin && p.spinT >= SPIN_MIN) endSpin(p);
   } else if (inp.spin && !p.spinLock && p.onGround && p.spinCd <= 0) {
-    p.spinning = true; p.spinT = 0; p.spinCombo = 0;
+    p.spinning = true; p.waage = false; p.spinT = 0; p.spinCombo = 0;
     sfx('spin');
   }
 
@@ -407,8 +409,11 @@ function stepPlayer(lvl, p, inp, dt) {
     p.vx = Math.abs(p.vx) <= fr ? 0 : p.vx - Math.sign(p.vx) * fr;
   }
 
-  // Rittberger
-  if (p.jumpBuf > 0 && p.coyote > 0) {
+  // Sprungtaste: aus der Sitzpirouette in die Waagepirouette, sonst (auch aus der Waage) der Rittberger
+  if (p.jumpBuf > 0 && p.coyote > 0 && p.spinning && !p.waage) {
+    p.waage = true; p.jumpBuf = 0;                       // der Schwung läuft weiter – und geht in der Waage schneller zur Neige
+    sfx('waage');
+  } else if (p.jumpBuf > 0 && p.coyote > 0) {
     p.vy = -JUMP_V; p.jumpBuf = 0; p.coyote = 0; p.onGround = false;
     p.jumping = true; p.rotating = true; p.airRot = 0; p.axel = false;
     if (p.spinning) endSpin(p);
@@ -437,7 +442,8 @@ function stepPlayer(lvl, p, inp, dt) {
 // Weiche Übergänge für die Darstellung: Umdrehen, In-die-Hocke-Gehen, Drehwinkel, Landung
 function animatePlayer(p, dt) {
   p.turnK += clamp((p.facing > 0 ? 0 : 1) - p.turnK, -dt * 8, dt * 8);
-  p.sitK += clamp((p.spinning ? 1 : 0) - p.sitK, -dt * 8, dt * 10);
+  p.sitK += clamp((p.spinning && !p.waage ? 1 : 0) - p.sitK, -dt * 8, dt * 10);
+  p.waK += clamp((p.spinning && p.waage ? 1 : 0) - p.waK, -dt * 8, dt * 10);
   if (p.spinning) p.spinYaw += 14 * dt;
   else if (!p.onGround && p.rotating) p.spinYaw += (p.axel ? 15.5 : 10.2) * dt;
   else {                                                 // nach der Drehung zur Blickrichtung zurück
@@ -466,7 +472,7 @@ function hurt(fromX) {
   const p = G.p;
   if (p.invuln > 0 || G.state !== 'play') return;
   G.hearts--; G.shake = 0.3; p.hurtT = 0;
-  p.spinning = false; p.spinCd = SPIN_CD; p.jumping = false; p.rotating = false; p.axel = false;
+  p.spinning = false; p.waage = false; p.spinCd = SPIN_CD; p.jumping = false; p.rotating = false; p.axel = false;
   if (G.hearts <= 0) {
     p.dead = true; p.vy = -620; p.vx = 0;
     gameOver();
@@ -656,14 +662,15 @@ function updatePlay(dt) {
     updateEnemy(lvl, e, dt);
     if (e.state !== 'live') continue;
     const axelHit = p.axel && e.type === 'bird';         // im Axel erwischt man Tauben aus jeder Richtung
-    const pad = p.spinning ? 9 : axelHit ? 5 : 0, padY = axelHit ? 5 : 0;
+    const pad = p.spinning ? (p.waage ? 12 : 9) : axelHit ? 5 : 0, padY = axelHit ? 5 : 0;
     if (p.x - pad < e.x + e.w && p.x + p.w + pad > e.x && p.y - padY < e.y + e.h && pby + padY > e.y) {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (p.spinning) {
         e.state = 'spun'; e.spinDir = ecx >= pcx ? 1 : -1; e.vx = e.spinDir * 250; e.vy = -540;
         p.spinCombo++;
-        addScore(200 * p.spinCombo);
-        popup(ecx, e.y - 12, p.spinCombo > 1 ? `Sitzpirouette ×${p.spinCombo}!` : 'Sitzpirouette!', '#8ef3ff');
+        const fig = p.waage ? 'Waagepirouette' : 'Sitzpirouette';
+        addScore((p.waage ? 400 : 200) * p.spinCombo);       // die Waage zählt doppelt
+        popup(ecx, e.y - 12, p.spinCombo > 1 ? `${fig} ×${p.spinCombo}!` : `${fig}!`, p.waage ? '#ff8fb8' : '#8ef3ff');
         burst(ecx, ecy, 10, ['#8ef3ff', '#ffffff', '#ffd23f']);
         sfx('hit');
       } else if (p.vy > 0 && pby - e.y < 20 && e.type !== 'ball') {
@@ -788,14 +795,16 @@ function update(dt) {
     G.wipe = Math.max(0, G.wipe - dt); G.toastT = Math.max(0, G.toastT - dt);
     for (const f of lvl.flags) if (f.on) f.raise = Math.min(1, f.raise + dt * 3);
   }
+  if (G.state === 'win' && !G.hsAsked && G.stateT > 1.4 && G.score > 0) { G.hsAsked = true; hsOpen('entry', G.score); }
   input.jumpPressed = false;
 }
 
 // Enter / Leertaste / Tippen in Menüs
 function confirm() {
+  if (HS.open) return;
   switch (G.state) {
-    case 'title': G.score = 0; startLevel(0); break;
-    case 'pause': setState('play'); break;
+    case 'title': G.score = 0; G.hsAsked = false; startLevel(0); break;
+    case 'pause': MENU[G.menu][1](); break;
     case 'over': if (G.stateT > 0.9) { G.score = G.scoreAtStart; startLevel(G.levelIdx); } break;
     case 'finale': if (G.stateT > 0.6) skipFinale(); break;
     case 'clear':
@@ -804,20 +813,30 @@ function confirm() {
         else { setState('win'); sfx('win'); }
       }
       break;
-    case 'win': if (G.stateT > 1) showTitle(); break;
+    case 'win': if (G.stateT > 1.8) showTitle(); break;
     default: break;
   }
 }
+// Pausenmenü: mit ↑ ↓ wählen und bestätigen – oder den Knopf antippen
+const MENU = [['Weiter', () => setState('play')], ['Kür neu starten', () => restartLevel()], ['Bestenliste', () => hsOpen('list')], ['Spiel verlassen', () => showTitle()]];
+const menuRect = i => ({ x: LW / 2 - 96, y: 102 + i * 27, w: 192, h: 22 });
+function menuMove(d) { G.menu = (G.menu + d + MENU.length) % MENU.length; sfx('card'); }
+function menuAt(x, y) {
+  for (let i = 0; i < MENU.length; i++) { const r = menuRect(i); if (x >= r.x && x < r.x + r.w && y >= r.y - 2 && y < r.y + r.h + 2) return i; }
+  return -1;
+}
 function togglePause() {
+  if (HS.open) return;
   if (G.state === 'play') setState('pause');
   else if (G.state === 'pause') setState('play');
 }
 
 // ───────────────────────── Pixel-Grundlagen ─────────────────────────
-// Gezeichnet wird auf 480×270 Pixel (1 Bildpixel = 2 Welt-Einheiten) und dann hart hochskaliert.
+// Gezeichnet wird in 480×270 Bildpixeln (1 Bildpixel = 2 Welt-Einheiten). Die Leinwand selbst hat HD-mal so viele
+// Pixel: Alles wird hart hochskaliert, nur die Läuferin nutzt die feinere Auflösung.
 function makeCanvas(w, h) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; return cv; }
 function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
-const INK_RGB = hexRgb(INK);
+const INK_RGB = hexRgb(INK), WHITE_RGB = [255, 255, 255];
 const wpx = v => Math.floor(v / PXS);
 function R(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
 function disc(c, cx, cy, r, col) {
@@ -974,12 +993,12 @@ defMat('neck', '#9be6bf', '#5fc795', '#3a8f69');
 const C_INK = M.ink + 1, C_WHITE = M.white;
 const LX = -0.45, LY = -0.62, LZ = 0.64;                 // Licht von links oben vorn
 
-function makeRaster(size, ox, oy) {
+function makeRaster(size, ox, oy, s = 1) {              // s: Feinheit – 2 heißt doppelt so viele Pixel je Richtung
   const cv = makeCanvas(size, size), c = cv.getContext('2d');
-  return { size, ox, oy, cv, c, img: c.createImageData(size, size), col: new Uint8Array(size * size), z: new Float32Array(size * size), id: new Uint8Array(size * size), cy: 1, sy: 0, cr: 1, sr: 0, roll: false, pivot: 0 };
+  return { size, ox, oy, s, edge: new Uint8Array(size * size), cv, c, img: c.createImageData(size, size), col: new Uint8Array(size * size), z: new Float32Array(size * size), id: new Uint8Array(size * size), cy: 1, sy: 0, cr: 1, sr: 0, roll: false, pivot: 0 };
 }
 let RS = null;
-function rasters() { return RS || (RS = { skater: makeRaster(48, 24, 40), enemy: makeRaster(36, 18, 28) }); }
+function rasters() { return RS || (RS = { skater: makeRaster(SKATER_PX, 24 * HD, 40 * HD, HD), enemy: makeRaster(36, 18, 28) }); }
 
 function rsBegin(rs, yaw, roll, pivot) {
   rs.col.fill(0); rs.z.fill(-1e9);
@@ -990,7 +1009,7 @@ function rsT(rs, p) {
   let X = p[0] * rs.cy + p[2] * rs.sy, Y = p[1];
   const Z = -p[0] * rs.sy + p[2] * rs.cy;
   if (rs.roll) { const x = X, y = Y - rs.pivot; X = x * rs.cr - y * rs.sr; Y = x * rs.sr + y * rs.cr + rs.pivot; }
-  return [rs.ox + X, rs.oy - Y, Z];
+  return [rs.ox + X * rs.s, rs.oy - Y * rs.s, Z * rs.s];
 }
 function splat(rs, X, Y, Z, rx, ry, m, id) {
   const S = rs.size;
@@ -1009,20 +1028,20 @@ function splat(rs, X, Y, Z, rx, ry, m, id) {
     }
   }
 }
-function rsSph(rs, p, r, m, id, ry) { const q = rsT(rs, p); splat(rs, q[0], q[1], q[2], r, ry || r, m, id); }
+function rsSph(rs, p, r, m, id, ry) { const q = rsT(rs, p); splat(rs, q[0], q[1], q[2], r * rs.s, (ry || r) * rs.s, m, id); }
 function rsCap(rs, a, b, ra, rb, m, id) {
   const A = rsT(rs, a), B = rsT(rs, b);
   const n = Math.max(1, Math.ceil(Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]) / 0.55));
   for (let i = 0; i <= n; i++) {
-    const k = i / n, r = ra + (rb - ra) * k;
+    const k = i / n, r = (ra + (rb - ra) * k) * rs.s;
     splat(rs, A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k, A[2] + (B[2] - A[2]) * k, r, r, m, id);
   }
 }
 // Einzelne Pixel (Augen …) auf der Oberfläche; nur sichtbar, wenn sie zur Kamera zeigen
 function rsDecal(rs, p, cells, id) {
-  const q = rsT(rs, p), S = rs.size, bx = Math.floor(q[0]), by = Math.floor(q[1]), z = q[2] + 0.7;
-  for (const [dx, dy, col] of cells) {
-    const x = bx + dx, y = by + dy;
+  const q = rsT(rs, p), S = rs.size, k = rs.s, bx = Math.floor(q[0]), by = Math.floor(q[1]), z = q[2] + 0.7 * k;
+  for (const [dx, dy, col] of cells) for (let n = 0; n < k * k; n++) {
+    const x = bx + dx * k + n % k, y = by + dy * k + Math.floor(n / k);
     if (x < 0 || y < 0 || x >= S || y >= S) continue;
     const i = y * S + x;
     if (rs.col[i] && z >= rs.z[i]) { rs.col[i] = col; rs.z[i] = z; rs.id[i] = id; }
@@ -1037,17 +1056,21 @@ function rsFinish(rs, flash) {
     for (const j of [i + 1, i + S]) {
       if (!col[j] || id[i] === id[j]) continue;
       const dz = z[i] - z[j];
-      if (dz > 1.5) darken(j); else if (dz < -1.5) darken(i);
+      if (dz > 1.5 * rs.s) darken(j); else if (dz < -1.5 * rs.s) darken(i);
     }
   }
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const i = y * S + x, o = i * 4, c = col[i];
-    if (c) {
-      const p = flash ? [255, 255, 255] : PAL[c];
-      d[o] = p[0]; d[o + 1] = p[1]; d[o + 2] = p[2]; d[o + 3] = 255;
-    } else if ((x > 0 && col[i - 1]) || (x < S - 1 && col[i + 1]) || (y > 0 && col[i - S]) || (y < S - 1 && col[i + S])) {
-      d[o] = INK_RGB[0]; d[o + 1] = INK_RGB[1]; d[o + 2] = INK_RGB[2]; d[o + 3] = 255;
-    } else d[o + 3] = 0;
+  // Kontur: so dick wie ein grober Pixel, also bei feinerem Raster entsprechend mehr Ringe
+  const edge = rs.edge;
+  edge.fill(0);
+  for (let ring = 1; ring <= rs.s; ring++) for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const i = y * S + x;
+    if (col[i] || edge[i]) continue;
+    const at = k => (ring === 1 ? col[k] !== 0 : edge[k] === ring - 1);
+    if ((x > 0 && at(i - 1)) || (x < S - 1 && at(i + 1)) || (y > 0 && at(i - S)) || (y < S - 1 && at(i + S))) edge[i] = ring;
+  }
+  for (let i = 0, o = 0; i < S * S; i++, o += 4) {
+    const c = col[i], p = c ? (flash ? WHITE_RGB : PAL[c]) : edge[i] ? INK_RGB : null;
+    if (p) { d[o] = p[0]; d[o + 1] = p[1]; d[o + 2] = p[2]; d[o + 3] = 255; } else d[o + 3] = 0;
   }
   rs.c.putImageData(rs.img, 0, 0);
   return rs.cv;
@@ -1224,6 +1247,7 @@ function drawPlayer(c, cam) {
       if (p.landT < 0.34) P = mixPose(skaterPose('land', o), P, smooth((p.landT - 0.12) / 0.22));
     }
     if (p.sitK > 0) P = mixPose(P, skaterPose('sit', o), smooth(p.sitK));
+    if (p.waK > 0) P = mixPose(P, skaterPose('waage', o), smooth(p.waK));
     if (finPhase('dance') && p.onGround) {                 // die kleine Kür nach dem Ziel
       const d = danceMove(G.fin.t, o);
       if (d.P) P = mixPose(P, d.P, d.k);
@@ -1241,7 +1265,7 @@ function drawPlayer(c, cam) {
     }
   }
   // Pferdeschwanz und Rock reagieren auf Tempo, Fallen und Drehung
-  const spin = Math.max(p.sitK, danceSpin, !p.onGround && p.rotating ? 1 : 0);
+  const spin = Math.max(p.sitK, p.waK, danceSpin, !p.onGround && p.rotating ? 1 : 0);
   const tail = [-0.45 - speed * 0.7 - spin * 0.6, -0.9 + (p.onGround ? 0 : clamp(p.vy / 600, -0.5, 1.7)) + spin * 0.85, 0];
   const cv = renderSkater(P, yaw, roll, blink && p.hurtT < 0.12, tail, o.lean * 1.1);
 
@@ -1252,7 +1276,7 @@ function drawPlayer(c, cam) {
   }
   // Glitzerkranz bei Drehungen – hintere Hälfte hinter der Figur, vordere davor
   const ring = spin > 0.3 && !p.dead
-    ? (p.sitK > 0.3 ? { y: py - 4, r: 15, n: 6, col: '#ffd23f' } : p.axel ? { y: py - 17, r: 14, n: 8, col: '#8ef3ff' } : { y: py - 15, r: 10, n: 4, col: '#ffd23f' })
+    ? (p.waK > 0.3 ? { y: py - 17, r: 17, n: 8, col: '#ff8fb8' } : p.sitK > 0.3 ? { y: py - 4, r: 15, n: 6, col: '#ffd23f' } : p.axel ? { y: py - 17, r: 14, n: 8, col: '#8ef3ff' } : { y: py - 15, r: 10, n: 4, col: '#ffd23f' })
     : null;
   const sparkle = front => {
     for (let i = 0; i < ring.n; i++) {
@@ -1265,7 +1289,7 @@ function drawPlayer(c, cam) {
     }
   };
   if (ring) sparkle(false);
-  c.drawImage(cv, px - 24, py - 40);
+  c.drawImage(cv, px - 24, py - 40, 48, 48);
   if (ring) sparkle(true);
 }
 
@@ -1834,7 +1858,7 @@ function drawTitle(c) {
   }
 
   // Vorführung: rollen – Rittberger – Axel – Sitzpirouette
-  const ph = t % 8, cx = LW / 2, gy = 162, o = { t, stride: t * 8, lean: 0.8 };
+  const ph = t % 10.4, cx = LW / 2, gy = 162, o = { t, stride: t * 8, lean: 0.8 };
   let label, P, yaw = 0, h = 0, tail = [-1.1, -0.5, 0];
   if (ph < 2.4) { P = skaterPose('skate', o); label = 'Rollen'; }
   else if (ph < 3.6) {
@@ -1848,26 +1872,32 @@ function drawTitle(c) {
     P = mixPose(skaterPose('axel', o), skaterPose('open', o), clamp((k - 0.8) * 5, 0, 1));
     if (k < 0.16) P = mixPose(skaterPose('axelKick', o), P, smooth(k / 0.16));
     yaw = smooth(k) * TAU * 3; tail = [-1, 0.3, 0]; label = 'Axel';
-  } else {
+  } else if (ph < 8) {
     const k = ph - 5.2;
     P = mixPose(skaterPose('idle', o), skaterPose('sit', o), smooth(Math.min(k * 6, (2.8 - k) * 6)));
     yaw = k * 13; tail = [-1, 0, 0]; label = 'Sitzpirouette';
+  } else {
+    const k = ph - 8;
+    P = mixPose(skaterPose('idle', o), skaterPose('waage', o), smooth(Math.min(k * 6, (2.4 - k) * 6)));
+    yaw = k * 13; tail = [-1, 0, 0]; label = 'Waagepirouette';
   }
   c.globalAlpha = 0.35; R(c, cx - 30, gy - 1, 60, 3, INK); R(c, cx - 24, gy + 2, 48, 2, INK); c.globalAlpha = 1;
-  c.drawImage(renderSkater(P, yaw, 0, false, tail, 0.8), 0, 0, 48, 48, cx - 72, gy - 120 - h * 3, 144, 144);
+  c.drawImage(renderSkater(P, yaw, 0, false, tail, 0.8), 0, 0, SKATER_PX, SKATER_PX, cx - 72, gy - 120 - h * 3, 144, 144);
   drawText(c, label, cx, gy + 10, { col: '#8ef3ff', align: 'center' });
 
-  if (blinkOn()) drawText(c, isTouch ? 'Tippen zum Start' : 'Enter drücken zum Start', cx, 190, { col: '#ffd23f', align: 'center', scale: 2 });
+  if (blinkOn()) drawText(c, isTouch ? 'Tippen zum Start' : 'Enter drücken zum Start', cx, 188, { col: '#ffd23f', align: 'center', scale: 2 });
   if (isTouch) {
-    legendRow(c, 212, [['k', '← →'], ['t', 'Rollen'], ['k', 'A'], ['t', 'Rittberger – auf Gegner springen']]);
-    legendRow(c, 227, [['k', 'A'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich']]);
-    legendRow(c, 242, [['k', 'B'], ['t', 'Sitzpirouette – Gegner wegdrehen']]);
+    legendRow(c, 207, [['k', '← →'], ['t', 'Rollen'], ['k', 'A'], ['t', 'Rittberger – auf Gegner springen']]);
+    legendRow(c, 220, [['k', 'A'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich']]);
+    legendRow(c, 233, [['k', 'B'], ['t', 'Sitzpirouette – Gegner wegdrehen']]);
+    legendRow(c, 246, [['k', 'B'], ['k', 'A'], ['t', 'Waage – doppelte Punkte · nochmal A: Sprung']]);
   } else {
-    legendRow(c, 212, [['k', '←'], ['k', '→'], ['t', 'Rollen'], ['k', 'Leertaste'], ['t', 'Rittberger – auf Gegner springen']]);
-    legendRow(c, 227, [['k', 'Leertaste'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich']]);
-    legendRow(c, 242, [['k', '↓'], ['t', 'Sitzpirouette – Gegner wegdrehen'], ['k', 'P'], ['t', 'Pause'], ['k', 'M'], ['t', 'Ton'], ['k', 'R'], ['t', 'Neustart']]);
+    legendRow(c, 207, [['k', '←'], ['k', '→'], ['t', 'Rollen'], ['k', 'Leertaste'], ['t', 'Rittberger – auf Gegner springen']]);
+    legendRow(c, 220, [['k', 'Leertaste'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich']]);
+    legendRow(c, 233, [['k', '↓'], ['t', 'Sitzpirouette – Gegner wegdrehen'], ['k', 'P'], ['t', 'Pause'], ['k', 'M'], ['t', 'Ton'], ['k', 'H'], ['t', 'Bestenliste']]);
+    legendRow(c, 246, [['k', '↓'], ['k', 'Leertaste'], ['t', 'Waage – doppelte Punkte · nochmal Leertaste: Sprung']]);
   }
-  drawText(c, 'Gamepad: Steuerkreuz · A Sprung/Axel · B Pirouette · Start Pause', cx, 257, { col: '#c9b6f0', align: 'center' });
+  drawText(c, 'Gamepad: Steuerkreuz · A Sprung/Axel/Waage · B Pirouette · Start Pause', cx, 260, { col: '#c9b6f0', align: 'center' });
   if (G.best > 0) drawText(c, `Bestleistung ${G.best}`, LW - 6, 4, { col: '#ffe9b0', align: 'right' });
 }
 
@@ -1910,9 +1940,10 @@ function drawWin(c) {
   drawText(c, G.score >= G.best ? 'Neue Bestleistung!' : `Bestleistung ${G.best}`, LW / 2, 172, { col: '#8ef3ff', align: 'center' });
   for (const s of [-1, 1]) {
     const cv = renderSkater(skaterPose('win', { t: t + s }), s > 0 ? -Math.PI + 0.9 : -0.9, 0, false, [-0.6, -0.8, 0], 0);
-    c.drawImage(cv, 0, 0, 48, 48, LW / 2 + s * 150 - 60, 120, 120, 120);
+    c.drawImage(cv, 0, 0, SKATER_PX, SKATER_PX, LW / 2 + s * 150 - 60, 120, 120, 120);
   }
-  if (G.stateT > 1 && blinkOn()) drawText(c, 'Zurück zum Start', LW / 2, 232, { align: 'center', scale: 2 });
+  if (G.stateT > 1.8 && blinkOn()) drawText(c, 'Zurück zum Start', LW / 2, 232, { align: 'center', scale: 2 });
+  drawText(c, isTouch ? 'TOP – Bestenliste' : 'H – Bestenliste', LW / 2, 254, { col: '#c9b6f0', align: 'center' });
 }
 
 // Würfel-Blende beim Levelstart
@@ -1931,12 +1962,13 @@ let zoomCv = null;
 function drawScene(c) {
   const z = G.zoom, p = G.p;
   if (z <= 1.001 || !p) { drawWorld(c); return; }
-  const cv = zoomCv || (zoomCv = makeCanvas(LW, LH)), wc = cv.getContext('2d');
+  const cv = zoomCv || (zoomCv = makeCanvas(LW * HD, LH * HD)), wc = cv.getContext('2d');
+  wc.setTransform(HD, 0, 0, HD, 0, 0);
   wc.imageSmoothingEnabled = false;
   drawWorld(wc);
   const w = LW / z, h = LH / z;
   const fx = wpx(p.x + p.w / 2) - Math.floor(G.cam / PXS) + G.zoomDx, fy = wpx(G.zoomY);
-  c.drawImage(cv, Math.round(clamp(fx - w / 2, 0, LW - w)), Math.round(clamp(fy - h * 0.74, 0, LH - h)), w, h, 0, 0, LW, LH);
+  c.drawImage(cv, Math.round(clamp(fx - w / 2, 0, LW - w)) * HD, Math.round(clamp(fy - h * 0.74, 0, LH - h)) * HD, w * HD, h * HD, 0, 0, LW, LH);
 }
 
 function render(c) {
@@ -1947,8 +1979,15 @@ function render(c) {
     case 'play': drawHud(c); break;
     case 'pause':
       drawHud(c); dim(c, 0.6);
-      drawText(c, 'Pause', LW / 2, 96, { scale: 5, align: 'center', grad: GOLD });
-      drawText(c, isTouch ? 'Tippen – weiter' : 'P oder Enter – weiter      R – Kür neu starten', LW / 2, 148, { col: '#ffe9b0', align: 'center' });
+      drawText(c, 'Pause', LW / 2, 48, { scale: 5, align: 'center', grad: GOLD });
+      MENU.forEach(([label], i) => {
+        const r = menuRect(i), on = i === G.menu;
+        R(c, r.x - 1, r.y, r.w + 2, r.h, INK); R(c, r.x, r.y - 1, r.w, r.h + 2, INK);
+        R(c, r.x, r.y, r.w, r.h, on ? '#ffd23f' : '#fffaf0'); R(c, r.x, r.y + r.h - 3, r.w, 3, on ? '#e09a10' : '#e0d6c0');
+        drawText(c, label, LW / 2, r.y + 4, { scale: 2, col: INK, outline: null, align: 'center' });
+        if (on) { drawText(c, '→', r.x - 11, r.y + 7, { col: '#ffd23f' }); drawText(c, '←', r.x + r.w + 6, r.y + 7, { col: '#ffd23f' }); }
+      });
+      drawText(c, isTouch ? 'Antippen zum Auswählen' : '↑ ↓ wählen · Enter bestätigen · P weiter', LW / 2, 216, { col: '#ffe9b0', align: 'center' });
       break;
     case 'over':
       drawHud(c); dim(c, clamp(Math.floor(G.stateT / 0.15) * 0.12, 0, 0.6));
@@ -1968,6 +2007,99 @@ function render(c) {
   if (muted) drawText(c, 'Ton aus', 6, LH - 10);
 }
 
+// ───────────────────────── Bestenliste ─────────────────────────
+// Die Top 100 liegen auf dem Server (server.js). Eintragen kann man sich nach der Goldmedaille; der zuletzt
+// gespeicherte Name wird beim nächsten Mal vorgeschlagen. Liste und Namensfeld sind HTML über dem Spielbild –
+// so funktionieren Bildschirmtastatur und Scrollen von selbst.
+const HS = { open: false, openedAt: 0, score: 0, busy: false };
+const HS_API = 'api/scores', NAME_MAX = 12;
+const byId = id => document.getElementById(id);
+// Gleiche Regel wie auf dem Server: Großbuchstaben, Ziffern, Leerzeichen und . - !
+function cleanName(raw) {
+  const s = String(raw).normalize('NFC').toLocaleUpperCase('de-DE').replace(/[^\p{L}\p{N} .\-!]/gu, '').replace(/\s+/g, ' ').trim();
+  return Array.from(s).slice(0, NAME_MAX).join('').trim();
+}
+function loadName() { try { return cleanName(localStorage.getItem('krec-jumper-name') || ''); } catch (e) { return ''; } }
+function saveName(name) { try { localStorage.setItem('krec-jumper-name', name); } catch (e) { /* egal */ } }
+function hsMsg(text) { byId('hsMsg').textContent = text; }
+function hsMode(entry) { byId('hsForm').hidden = !entry; byId('hsList').hidden = entry; byId('hsClose').hidden = entry; }
+
+function hsOpen(mode, score) {
+  if (typeof document === 'undefined' || !byId('hs') || HS.open) return;
+  if (G.state === 'play') setState('pause');
+  clearSource(0); clearSource(1);
+  document.querySelectorAll('#touch .on').forEach(b => b.classList.remove('on'));
+  HS.open = true; HS.openedAt = performance.now(); HS.busy = false;
+  byId('hs').hidden = false;
+  hsMode(mode === 'entry');
+  hsMsg('');
+  if (mode === 'entry') {
+    HS.score = score;
+    byId('hsScore').textContent = `${score} Punkte – trag dich in die Bestenliste ein!`;
+    const field = byId('hsName');
+    field.value = loadName();                            // Vorschlag: der zuletzt gespeicherte Name
+    field.focus(); field.select();
+  } else { byId('hsClose').focus(); hsLoad(); }
+}
+function hsClose() {
+  HS.open = false;
+  byId('hs').hidden = true;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+}
+function hsRender(scores, me) {
+  const list = byId('hsList');
+  list.textContent = '';
+  if (!scores.length) {
+    const li = document.createElement('li');
+    li.className = 'none'; li.textContent = 'Noch keine Einträge – hol dir Platz 1!';
+    list.appendChild(li);
+    return;
+  }
+  scores.forEach((s, i) => {
+    const li = document.createElement('li');
+    for (const text of [`${i + 1}.`, s.name, String(s.score)]) { const span = document.createElement('span'); span.textContent = text; li.appendChild(span); }
+    if (i === me) li.className = 'me';
+    list.appendChild(li);
+  });
+  const mine = list.querySelector('.me');
+  if (mine) mine.scrollIntoView({ block: 'center' }); else list.scrollTop = 0;
+}
+async function hsLoad() {
+  hsMsg('Lade …'); byId('hsList').textContent = '';
+  try {
+    const r = await fetch(HS_API, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    hsRender((await r.json()).scores, -1);
+    hsMsg('');
+  } catch (e) { hsMsg('Die Bestenliste ist gerade nicht erreichbar.'); }
+}
+async function hsSubmit() {
+  if (HS.busy || performance.now() - HS.openedAt < 600) return;   // nicht versehentlich mit der noch gedrückten Enter-Taste
+  const name = cleanName(byId('hsName').value);
+  if (!name) { hsMsg('Bitte gib einen Namen ein.'); byId('hsName').focus(); return; }
+  HS.busy = true; hsMsg('Speichere …');
+  try {
+    const r = await fetch(HS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, score: HS.score }) });
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    saveName(name);
+    hsMode(false);
+    hsRender(d.scores, d.rank ? d.rank - 1 : -1);
+    hsMsg(d.rank ? `Platz ${d.rank} für ${name}!` : 'Diesmal hat es nicht für die besten 100 gereicht.');
+    byId('hsClose').focus();
+  } catch (e) { hsMsg('Speichern hat nicht geklappt – versuch es noch einmal.'); }
+  HS.busy = false;
+}
+function hsInit() {
+  if (!byId('hs')) return;
+  byId('hsForm').addEventListener('submit', e => { e.preventDefault(); hsSubmit(); });
+  byId('hsSkip').addEventListener('click', hsClose);
+  byId('hsClose').addEventListener('click', hsClose);
+  byId('hs').addEventListener('pointerdown', e => { if (e.target === byId('hs') && byId('hsForm').hidden) hsClose(); });   // Tippen neben die Liste schließt sie
+  const btn = byId('hsBtn');
+  if (btn) btn.addEventListener('pointerdown', e => { e.preventDefault(); hsOpen('list'); });
+}
+
 // ───────────────────────── Eingabe: Tastatur, Touch, Gamepad ─────────────────────────
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
@@ -1976,6 +2108,7 @@ const KEYMAP = {
 };
 let isTouch = false;
 function press(k) {
+  if (HS.open) return;
   if (k === 'jump') {
     if (G.state !== 'play') { confirm(); input.jump = true; return; }
     if (!input.jump) input.jumpPressed = true;
@@ -1992,19 +2125,21 @@ function setKey(src, k, on) {
 }
 function clearSource(src) { for (const k of Object.keys(held)) setKey(src, k, false); }
 function restartLevel() {
+  if (HS.open) return;
   if (G.state === 'play' || G.state === 'pause') { G.score = G.scoreAtStart; startLevel(G.levelIdx); }
 }
 
 // Gamepad: Steuerkreuz/Stick = rollen, A/Y = Sprung (in der Luft: Axel), B/X/Schultertasten/unten = Pirouette, Start = Pause
-const pad = { start: false, select: false, any: false };
+const pad = { start: false, select: false, any: false, up: false, down: false };
 function pollGamepads() {
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
-  let l = false, r = false, j = false, s = false, start = false, select = false, any = false;
+  let l = false, r = false, j = false, s = false, start = false, select = false, any = false, up = false, down = false;
   for (const gp of navigator.getGamepads()) {
     if (!gp || !gp.connected) continue;
     const b = i => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
     const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
     any = true;
+    up = up || b(12) || ay < -0.65; down = down || b(13) || ay > 0.65;
     l = l || b(14) || ax < -0.4; r = r || b(15) || ax > 0.4;
     j = j || b(0) || b(3);
     s = s || b(1) || b(2) || b(4) || b(5) || b(6) || b(7) || b(13) || ay > 0.65;
@@ -2017,13 +2152,14 @@ function pollGamepads() {
   setKey(2, 'left', l); setKey(2, 'right', r); setKey(2, 'jump', j); setKey(2, 'spin', s);
   if (start && !pad.start) { if (G.state === 'play' || G.state === 'pause') togglePause(); else confirm(); }
   if (select && !pad.select) restartLevel();
-  pad.start = start; pad.select = select;
+  if (G.state === 'pause' && !HS.open) { if (up && !pad.up) menuMove(-1); if (down && !pad.down) menuMove(1); }
+  pad.start = start; pad.select = select; pad.up = up; pad.down = down;
 }
 
 function boot() {
   const canvas = document.getElementById('game'), screen = document.getElementById('screen');
   const ctx = canvas.getContext('2d');
-  canvas.width = LW; canvas.height = LH;
+  canvas.width = LW * HD; canvas.height = LH * HD;
 
   const setTouch = () => { if (!isTouch) { isTouch = true; document.body.classList.add('touch'); resize(); } };
   function resize() {
@@ -2045,7 +2181,13 @@ function boot() {
   resize();
 
   window.addEventListener('keydown', e => {
+    if (HS.open) { if (e.code === 'Escape') { e.preventDefault(); hsClose(); } return; }   // Tasten gehören jetzt dem Namensfeld
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (G.state === 'pause' && /^(ArrowUp|ArrowDown|KeyW|KeyS)$/.test(e.code)) {            // im Pausenmenü wählen ↑ ↓ den Eintrag
+      e.preventDefault(); audioInit();
+      if (!e.repeat) menuMove(e.code === 'ArrowUp' || e.code === 'KeyW' ? -1 : 1);
+      return;
+    }
     const k = KEYMAP[e.code];
     if (k || e.code === 'Enter') e.preventDefault();
     if (e.repeat) return;
@@ -2055,6 +2197,7 @@ function boot() {
     else if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
     else if (e.code === 'KeyM') toggleMute();
     else if (e.code === 'KeyR') restartLevel();
+    else if (e.code === 'KeyH') hsOpen('list');
   });
   window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) setKey(0, k, false); });
   window.addEventListener('blur', () => {
@@ -2064,7 +2207,13 @@ function boot() {
   });
   window.addEventListener('gamepaddisconnected', () => { G.toast = 'Gamepad getrennt'; G.toastT = 3; });
 
-  canvas.addEventListener('pointerdown', e => { e.preventDefault(); audioInit(); if (G.state !== 'play') confirm(); });
+  const menuUnder = e => { const r = canvas.getBoundingClientRect(); return menuAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault(); audioInit();
+    if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0 && !HS.open) { G.menu = i; MENU[i][1](); } }   // nur die Knöpfe zählen
+    else if (G.state !== 'play') confirm();
+  });
+  canvas.addEventListener('pointermove', e => { if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0) G.menu = i; } });
 
   // Touch: Der Daumen darf zwischen den Knöpfen eines Feldes gleiten, ohne abzusetzen
   const fingers = new Map();                             // pointerId → gedrückter Knopf
@@ -2089,6 +2238,7 @@ function boot() {
   });
   const pauseBtn = document.getElementById('pauseBtn');
   if (pauseBtn) pauseBtn.addEventListener('pointerdown', e => { e.preventDefault(); if (G.state === 'play' || G.state === 'pause') togglePause(); else confirm(); });
+  hsInit();
   const muteBtn = document.getElementById('muteBtn');
   if (muteBtn) muteBtn.addEventListener('pointerdown', e => { e.preventDefault(); audioInit(); toggleMute(); });
   const fsBtn = document.getElementById('fsBtn'), root = document.documentElement;
@@ -2113,7 +2263,7 @@ function boot() {
     pollGamepads();
     while (acc >= STEP) { update(STEP); acc -= STEP; }
     musicTick();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(HD, 0, 0, HD, 0, 0);
     render(ctx);
     requestAnimationFrame(frame);
   }
