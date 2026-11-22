@@ -12,7 +12,7 @@ const GRAVITY = 2300, JUMP_V = 780, JUMP_CUT = 280, MAX_FALL = 900;
 const MAX_RUN = 290, ACC_GROUND = 1500, ACC_AIR = 1050, ACC_TURN = 2600, FRICTION = 800;
 const COYOTE = 0.09, JUMP_BUF = 0.12;
 const AXEL_V = 380, AXEL_MIN_H = 45;                     // Axel: kleiner Auftrieb, erst ab 1,5 Kacheln über dem Boden
-const TITLE_HOLD = 0.3, LOGO_IN = 1.6, LOGO_BIG = 3.6;      // Startbildschirm: kurze Tastensperre; so lange und von so groß drehen sich die Wappen herein
+const TITLE_HOLD = 0.3, LOGO_IN = 1.8, LOGO_BIG = 3.6, LOGO_TURNS = 2;   // Startbildschirm: kurze Tastensperre; so lange, von so groß und mit so vielen Umdrehungen kommen die Wappen herein
 const GLIDE_MIN = 0.09, GLIDE_YAW = 0.6;                  // ab diesem Tempo Laufhaltung; so weit dreht sie sich dabei zum Bild
 const SPIN_MAX = 1.15, SPIN_MIN = 0.3, SPIN_CD = 0.4, WAAGE_COST = 1.5;   // die Waage verbraucht den Schwung anderthalbmal so schnell
 const PW = 20, PH = 54;
@@ -302,7 +302,8 @@ function tuneInit() {
   TUNE.el = a;
   document.addEventListener('visibilitychange', () => { if (document.hidden && !a.paused) a.pause(); });
 }
-const tuneWanted = () => G.state === 'title' && !muted && !document.hidden;
+const onTitle = () => G.state === 'title' || G.state === 'select';   // Startbildschirm und Figurenwahl
+const tuneWanted = () => onTitle() && !muted && !document.hidden;
 function tuneStart() {
   const a = TUNE.el;
   if (!a || TUNE.dead || TUNE.pending || TUNE.blocked || !a.paused || !tuneWanted()) return;
@@ -316,7 +317,7 @@ function tuneStart() {
     TUNE.pending = false;
     if (e && e.name === 'NotAllowedError') {              // der Browser will erst eine Eingabe sehen
       TUNE.blocked = true;
-      if (first && G.state === 'title') G.curtain = true; // dann wartet der Startbildschirm auf einen Tastendruck
+      if (first && onTitle()) G.curtain = true; // dann wartet der Startbildschirm auf einen Tastendruck
     } else if (!e || e.name !== 'AbortError') TUNE.dead = true;
   };
   if (p && p.then) p.then(ok, no); else ok();
@@ -329,7 +330,7 @@ function tuneTick(dt) {
   const a = TUNE.el;
   if (!a || TUNE.dead) return;
   const want = tuneWanted();
-  if (G.state !== 'title') TUNE.rewind = true;
+  if (!onTitle()) TUNE.rewind = true;
   if (want) tuneStart();
   if (a.paused || TUNE.pending) return;
   TUNE.vol = clamp(TUNE.vol + (want ? dt : -dt) / TUNE_FADE, 0, 1);
@@ -340,7 +341,7 @@ function tuneTick(dt) {
 const MUS = { key: null, song: null, i: 0, t0: 0, out: null, on: false, songs: {} };
 function musicWant() {
   switch (G.state) {
-    case 'title': return null;                           // hier läuft die Titelmelodie
+    case 'title': case 'select': return null;            // hier läuft die Titelmelodie
     case 'win': return G.stateT > 1.8 ? 'park' : null;   // erst die Siegesfanfare ausklingen lassen
     case 'play': case 'pause': case 'finale': return G.lvl.theme.song;
     default: return null;                                // Zieleinlauf und Sturz haben ihre eigenen Klänge
@@ -390,6 +391,7 @@ const G = {
   levelIdx: 0, lvl: null, p: null, enemies: [], particles: [], popups: [],
   cam: 0, shake: 0, wipe: 0, toast: '', toastT: 0, hearts: MAX_HEARTS, score: 0, scoreAtStart: 0, best: 0,
   time: 0, starsGot: 0, checkpoint: null, marks: [], bonus: 0, sparkT: 0, menu: 0, hsAsked: false, fin: null, stale: null, lockT: 0, zoom: 1, zoomDx: 0, zoomY: 0, curtain: false, camY: 0,
+  hero: 0,                                               // gewählte Figur: 0 Läuferin, 1 Läufer
 };
 
 function makePlayer(x, y) {
@@ -436,6 +438,18 @@ function showTitle() {
   G.p = null; G.particles = []; G.popups = []; G.zoom = 1; G.zoomDx = 0; G.camY = 0;
   setState('title');
 }
+
+// Figurenwahl vor dem Start – die letzte Wahl wird gemerkt
+const HEROES = ['Läuferin', 'Läufer'];
+function loadHero() { try { G.hero = localStorage.getItem('krec-jumper-figur') === '1' ? 1 : 0; } catch (e) { G.hero = 0; } }
+function pickHero(i) {
+  i = clamp(i, 0, HEROES.length - 1);
+  if (i === G.hero) return;
+  G.hero = i; sfx('star');
+  try { localStorage.setItem('krec-jumper-figur', String(i)); } catch (e) { /* egal */ }
+}
+const heroX = i => LW / 2 + (i ? 1 : -1) * 78;             // Bildmitte der beiden Figuren in der Auswahl
+const heroAt = (x, y) => (y > 46 && y < 226 && Math.abs(x - LW / 2) < 150 ? (x < LW / 2 ? 0 : 1) : -1);
 
 function loadBest() { try { G.best = +localStorage.getItem('krec-jumper-best') || 0; } catch (e) { G.best = 0; } }
 function saveBest() {
@@ -851,7 +865,7 @@ function update(dt) {
       for (const e of G.enemies) updateEnemy(lvl, e, dt);
       break;
     }
-    case 'title':
+    case 'title': case 'select':                         // im Hintergrund zieht die erste Kür vorbei
       G.cam = 200 + (Math.sin(G.t * 0.12 - 1.5) + 1) * 0.5 * Math.min(1600, lvl.W * TILE - VIEW_W - 200);
       for (const e of G.enemies) updateEnemy(lvl, e, dt);
       break;
@@ -881,7 +895,8 @@ function update(dt) {
 function confirm() {
   if (HS.open) return;
   switch (G.state) {
-    case 'title': if (G.stateT > TITLE_HOLD) { G.score = 0; G.hsAsked = false; startLevel(0); } break;
+    case 'title': if (G.stateT > TITLE_HOLD) setState('select'); break;
+    case 'select': if (G.stateT > TITLE_HOLD) { G.score = 0; G.hsAsked = false; startLevel(0); } break;
     case 'pause': MENU[G.menu][1](); break;
     case 'over': if (G.stateT > 0.9) { G.score = G.scoreAtStart; startLevel(G.levelIdx); } break;
     case 'finale': if (G.stateT > 0.6) skipFinale(); break;
@@ -1057,6 +1072,11 @@ defMat('dress', '#ff8fb8', '#ff3f86', '#b5175a');
 defMat('gold', '#fff5ad', '#ffd23f', '#c48c14');
 defMat('boot', '#ffffff', '#e4e8f6', '#a4abca');
 defMat('wheel', '#8ff5e6', '#19c7b5', '#0b7d76');
+// der Läufer: schwarze Hose, weißes Hemd, darüber eine Weste im Rosa ihres Kleids – dazu schwarze Rollschuhe
+defMat('pants', '#5a5478', '#2e2a48', '#17142a');
+defMat('shirt', '#ffffff', '#eef0fa', '#b4bad6');
+defMat('bootM', '#6a6488', '#34304e', '#1a172c');
+defMat('hairM', '#6a4a34', '#3a2418', '#1e110b');
 defMat('ink', INK, INK, INK);
 defMat('white', '#ffffff', '#ffffff', '#d8dcec');
 defMat('cone', '#ffb066', '#ff7a1a', '#c44a08');
@@ -1259,46 +1279,60 @@ function mixPose(a, b, k) {
 const smooth = k => { k = clamp(k, 0, 1); return k * k * (3 - 2 * k); };
 
 // Rendert die Läuferin in ihr Sprite. yaw: 0 = schaut nach rechts, -90° = zur Kamera, 180° = links.
-function renderSkater(P, yaw, roll, flash, tail, lag) {
-  const rs = rasters().skater;
+// who: 0 = Läuferin im Kleid, 1 = Läufer in Hose, Hemd und Weste. Ohne Angabe die gewählte Figur.
+function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
+  const rs = rasters().skater, man = who === 1;
   rsBegin(rs, yaw, roll, 14);
   const hip = P.hip, chest = P.chest, H = vadd(chest, P.head), F = P.flare;
+  const legMat = man ? M.pants : M.tights, bootMat = man ? M.bootM : M.boot, hairMat = man ? M.hairM : M.hair;
   for (const side of [-1, 1]) {
     const foot = side > 0 ? P.fa : P.fb, dir = vnorm(side > 0 ? P.da : P.db), id = side > 0 ? 2 : 1;
     const hp = [hip[0], hip[1], side * 1.3];
     const knee = ik3(hp, foot, 5.4, 5.4, [1, 0.3, side * 0.2]);
-    rsCap(rs, hp, knee, 1.65, 1.4, M.tights, id);
-    rsCap(rs, knee, foot, 1.35, 1.2, M.tights, id);
+    rsCap(rs, hp, knee, man ? 1.8 : 1.65, man ? 1.55 : 1.4, legMat, id);
+    rsCap(rs, knee, foot, man ? 1.5 : 1.35, man ? 1.4 : 1.2, legMat, id);
     const d = dir[1], n = vnorm([-dir[0] * d, 1 - d * d, -dir[2] * d]);   // „oben" am Rollschuh
-    rsCap(rs, vmad(vmad(foot, dir, -0.5), n, -0.2), vmad(vmad(foot, dir, 1.9), n, -0.7), 1.5, 1.35, M.boot, id);
-    rsSph(rs, vmad(foot, n, 1.0), 1.4, M.boot, id);
+    rsCap(rs, vmad(vmad(foot, dir, -0.5), n, -0.2), vmad(vmad(foot, dir, 1.9), n, -0.7), 1.5, 1.35, bootMat, id);
+    rsSph(rs, vmad(foot, n, 1.0), 1.4, bootMat, id);
     for (const w of [-0.9, 1.9]) for (const zz of [-0.8, 0.8]) rsSph(rs, vadd(vmad(vmad(foot, dir, w), n, -2.25), [0, 0, zz]), 1.05, M.wheel, id);
     rsSph(rs, vmad(vmad(foot, dir, 3.1), n, -1.5), 0.8, M.dress, id);
   }
-  // Rumpf, Röckchen (fliegt bei Drehungen nach außen), Gürtel
-  rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, M.dress, 3);
-  rsSph(rs, [hip[0] - lag, hip[1] - 0.9 + F * 0.5, 0], 4.3 + F * 1.9, M.dress, 3, 1.0);
-  rsSph(rs, [hip[0] - lag * 0.5, hip[1] + 0.2, 0], 3.7 + F * 1.0, M.dress, 3, 1.1);
-  rsSph(rs, [hip[0], hip[1] + 1.3, 0], 3.1 + F * 0.3, M.dress, 3, 1.2);
-  rsSph(rs, vadd(vmad(hip, [chest[0] - hip[0], chest[1] - hip[1], 0], 0.42), [0, 0, 0]), 2.85, M.gold, 3, 0.55);
+  const waist = vmad(hip, [chest[0] - hip[0], chest[1] - hip[1], 0], 0.42);
+  if (man) {
+    // Hose bis zur Taille, darüber die Weste mit Goldgürtel; am Hals schaut der Hemdkragen heraus
+    rsSph(rs, [hip[0], hip[1] + 0.3, 0], 2.75, M.pants, 3, 0.95);
+    rsCap(rs, [hip[0], hip[1] + 1.4, 0], chest, 2.55, 3.0, M.dress, 3);
+    rsSph(rs, waist, 2.8, M.gold, 3, 0.4);
+    rsSph(rs, vadd(chest, [0.5, 1.9, 0]), 1.7, M.shirt, 3, 0.8);
+  } else {
+    // Rumpf, Röckchen (fliegt bei Drehungen nach außen), Gürtel
+    rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, M.dress, 3);
+    rsSph(rs, [hip[0] - lag, hip[1] - 0.9 + F * 0.5, 0], 4.3 + F * 1.9, M.dress, 3, 1.0);
+    rsSph(rs, [hip[0] - lag * 0.5, hip[1] + 0.2, 0], 3.7 + F * 1.0, M.dress, 3, 1.1);
+    rsSph(rs, [hip[0], hip[1] + 1.3, 0], 3.1 + F * 0.3, M.dress, 3, 1.2);
+    rsSph(rs, waist, 2.85, M.gold, 3, 0.55);
+  }
   for (const side of [-1, 1]) {
     const hand = side > 0 ? P.ha : P.hb, id = side > 0 ? 5 : 4;
-    const shd = [chest[0], chest[1] + 0.5, side * 2.6];
+    const shd = [chest[0], chest[1] + 0.5, side * (man ? 2.9 : 2.6)];
     const el = ik3(shd, hand, 4, 4, [-0.7, -0.6, side * 0.9]);
-    rsSph(rs, shd, 1.45, M.dress, 3);
-    rsCap(rs, shd, el, 1.1, 1.0, M.skin, id);
-    rsCap(rs, el, hand, 1.0, 0.95, M.skin, id);
+    rsSph(rs, shd, man ? 1.6 : 1.45, man ? M.shirt : M.dress, 3);
+    rsCap(rs, shd, el, man ? 1.25 : 1.1, man ? 1.15 : 1.0, man ? M.shirt : M.skin, id);   // er trägt lange Hemdärmel
+    rsCap(rs, el, hand, man ? 1.15 : 1.0, man ? 1.05 : 0.95, man ? M.shirt : M.skin, id);
     rsSph(rs, hand, 1.2, M.skin, id);
   }
-  // Kopf mit Pferdeschwanz
+  // Kopf – sie mit Pferdeschwanz, er mit kurzem Haar
   rsSph(rs, vadd(chest, [0.2, 2.5, 0]), 1.2, M.skin, 6);
   rsSph(rs, vadd(H, [0.5, 0, 0]), 3.15, M.skin, 6);
-  rsSph(rs, vadd(H, [-0.55, 0.45, 0]), 3.5, M.hair, 7);
-  rsSph(rs, vadd(H, [1.6, 2.3, 0]), 1.8, M.hair, 7);
-  const B = vadd(H, [-2.7, 2.6, 0]), td = vnorm(tail);
-  rsSph(rs, B, 1.2, M.gold, 8);
-  rsCap(rs, vmad(B, td, 1.3), vmad(B, td, 3.4), 1.55, 1.35, M.hair, 7);
-  rsCap(rs, vmad(B, td, 3.4), vadd(vmad(B, td, 5.4), [0, -0.7, 0]), 1.35, 0.8, M.hair, 7);
+  rsSph(rs, vadd(H, [-0.55, 0.45, 0]), 3.5, hairMat, 7);
+  rsSph(rs, vadd(H, [1.6, 2.3, 0]), 1.8, hairMat, 7);
+  if (man) rsSph(rs, vadd(H, [0.6, 3.0, 0]), 1.9, hairMat, 7);
+  else {
+    const B = vadd(H, [-2.7, 2.6, 0]), td = vnorm(tail);
+    rsSph(rs, B, 1.2, M.gold, 8);
+    rsCap(rs, vmad(B, td, 1.3), vmad(B, td, 3.4), 1.55, 1.35, M.hair, 7);
+    rsCap(rs, vmad(B, td, 3.4), vadd(vmad(B, td, 5.4), [0, -0.7, 0]), 1.35, 0.8, M.hair, 7);
+  }
   for (const s of [-1, 1]) rsDecal(rs, vadd(H, [3.2, 0.9, s * 1.9]), [[0, 0, C_INK], [0, 1, C_INK]], 6);
   return rsFinish(rs, flash);
 }
@@ -1934,7 +1968,8 @@ function drawTitle(c) {
     x += w + 5;
   }
   drawText(c, 'Die große Rollkunstlauf-Kür', LW / 2, 57, { align: 'center' });
-  // Vereinswappen links und rechts der Vorführung: Sie drehen sich von groß auf ihren Platz und blenden dabei ein
+  // Vereinswappen links und rechts der Vorführung: Sie drehen sich wie eine Münze um die Hochachse, schrumpfen dabei
+  // von groß auf ihren Platz und blenden ein. Die Rückseite zeigt dasselbe Bild – so steht „KREC" nie spiegelverkehrt da.
   const lk = clamp(G.stateT / LOGO_IN, 0, 1), le = 1 - (1 - lk) * (1 - lk);
   for (const lx of [94, LW - 94]) {
     if (lk >= 1) drawLogo(c, lx - 32, 84, 64);
@@ -1942,7 +1977,8 @@ function drawTitle(c) {
       const sc = LOGO_BIG + (1 - LOGO_BIG) * le;
       c.save();
       c.globalAlpha = smooth(lk / 0.6);
-      c.translate(lx, 116); c.rotate((lx < LW / 2 ? -1 : 1) * (1 - le) * TAU); c.scale(sc, sc);
+      const turn = Math.abs(Math.cos((1 - le) * TAU * LOGO_TURNS));   // Breite beim Drehen um die Hochachse
+      c.translate(lx, 116); c.scale(sc * Math.max(turn, 0.03), sc);
       drawLogo(c, -32, -32, 64);
       c.restore();
     }
@@ -2027,6 +2063,29 @@ function drawClear(c) {
   }
 }
 
+// Figurenwahl: beide stehen nebeneinander, die gewählte rollt und winkt im Rahmen, die andere wartet
+function drawSelect(c) {
+  dim(c, 0.62);
+  const t = G.t;
+  drawText(c, 'Wähle deine Figur', LW / 2, 16, { scale: 3, align: 'center', grad: GOLD });
+  HEROES.forEach((name, i) => {
+    const on = i === G.hero, x = heroX(i), w = 124, h = 150, x0 = x - w / 2, y0 = 58;
+    R(c, x0 - 1, y0, w + 2, h, INK); R(c, x0, y0 - 1, w, h + 2, INK);
+    c.globalAlpha = on ? 1 : 0.5;
+    R(c, x0, y0, w, h, on ? '#ffd23f' : '#6a5a8c'); R(c, x0 + 3, y0 + 3, w - 6, h - 6, on ? '#3b2a66' : '#2b1f4a');
+    R(c, x0 + 3, y0 + h - 34, w - 6, 31, on ? '#4f3a86' : '#34265a');           // Boden unter der Figur
+    c.globalAlpha = 0.35; R(c, x - 26, y0 + h - 31, 52, 3, INK); c.globalAlpha = on ? 1 : 0.55;
+    const o = { t, stride: t * 8, lean: 0.5 };
+    const wave = on ? smooth(Math.sin(t * 1.6) * 1.6 - 0.2) : 0;                 // ab und zu die Arme hoch
+    const P = on ? mixPose(skaterPose('skate', o), skaterPose('win', o), wave) : skaterPose('idle', o);
+    c.drawImage(renderSkater(P, on ? -0.75 : -0.9, 0, false, [-0.7, -0.8, 0], on ? 0.5 : 0, i), 0, 0, SKATER_PX, SKATER_PX, x - 72, y0 + h - 30 - 120, 144, 144);
+    c.globalAlpha = 1;
+    drawText(c, name, x, y0 + h + 6, { scale: 2, align: 'center', col: on ? '#ffd23f' : '#c9b6f0' });
+    if (on && blinkOn()) { drawText(c, '→', x0 - 12, y0 + h / 2 - 4, { col: '#ffd23f' }); drawText(c, '←', x0 + w + 6, y0 + h / 2 - 4, { col: '#ffd23f' }); }
+  });
+  drawText(c, isTouch ? 'Figur antippen' : '← → wählen · Enter oder Leertaste: los geht\'s', LW / 2, 246, { col: '#ffe9b0', align: 'center' });
+}
+
 function drawWin(c) {
   dim(c, 0.66);
   const t = G.t, S = sprites();
@@ -2073,6 +2132,7 @@ function render(c) {
   drawScene(c);
   switch (G.state) {
     case 'title': drawTitle(c); break;
+    case 'select': drawSelect(c); break;
     case 'play': drawHud(c); break;
     case 'pause':
       drawHud(c); dim(c, 0.6);
@@ -2219,6 +2279,7 @@ function toggleFullscreen() {
 }
 function press(k) {
   if (HS.open) return;
+  if (G.state === 'select' && (k === 'left' || k === 'right')) pickHero(k === 'left' ? 0 : 1);
   if (k === 'jump') {
     if (G.state !== 'play') { confirm(); input.jump = true; return; }
     if (!input.jump) input.jumpPressed = true;
@@ -2304,6 +2365,7 @@ function boot() {
     audioInit();
     if (k) setKey(0, k, true);
     else if (e.code === 'Enter' || e.code === 'NumpadEnter') confirm();
+    else if (e.code === 'Escape' && G.state === 'select') setState('title');
     else if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
     else if (e.code === 'KeyM') toggleMute();
     else if (e.code === 'KeyR') restartLevel();
@@ -2318,11 +2380,13 @@ function boot() {
   });
   window.addEventListener('gamepaddisconnected', () => { G.toast = 'Gamepad getrennt'; G.toastT = 3; });
 
+  const heroUnder = e => { const r = canvas.getBoundingClientRect(); return heroAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
   const menuUnder = e => { const r = canvas.getBoundingClientRect(); return menuAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
   canvas.addEventListener('pointerdown', e => {
     e.preventDefault(); audioInit();
     if (!document.hasFocus()) window.focus();             // eingebettet: sonst kämen danach keine Tasten an
     if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0 && !HS.open) { G.menu = i; MENU[i][1](); } }   // nur die Knöpfe zählen
+    else if (G.state === 'select') { const i = heroUnder(e); if (i >= 0) { pickHero(i); confirm(); } }   // Figur antippen: wählen und los
     else if (G.state !== 'play') confirm();
   });
   canvas.addEventListener('pointermove', e => { if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0) G.menu = i; } });
@@ -2361,6 +2425,7 @@ function boot() {
   for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { document.body.classList.toggle('fs', !!fsElement()); resize(); });
 
   loadBest();
+  loadHero();
   loadMuted();
   loadLogo();
   tuneInit();

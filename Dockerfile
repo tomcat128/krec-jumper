@@ -1,5 +1,8 @@
 # KREC Jumper – Browserspiel mit gemeinsamer Bestenliste, ausgeliefert von einem kleinen Node-Server
 FROM node:22-alpine
+LABEL org.opencontainers.image.title="KREC Jumper" \
+      org.opencontainers.image.description="Rollkunstlauf-Jump'n'Run des Konstanzer Roll- und Eissportclubs mit gemeinsamer Bestenliste" \
+      org.opencontainers.image.source="https://github.com/tomcat128/krec-jumper"
 
 WORKDIR /app
 COPY ["server.js", "index.html", "game.js", "levels.js", "logo.png", "wir-vom-konstanzer-rec-(remastered).mp3", "./"]
