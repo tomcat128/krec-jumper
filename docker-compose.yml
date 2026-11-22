@@ -1,0 +1,9 @@
+services:
+  game:
+    build: .
+    image: krec-jumper
+    container_name: krec-jumper
+    ports:
+      # Im ganzen Netzwerk erreichbar. Nur lokal: "127.0.0.1:8085:80"
+      - "8085:80"
+    restart: unless-stopped
