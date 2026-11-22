@@ -18,8 +18,10 @@ const MAX_ENTRIES = 100, NAME_MAX = 12, SCORE_MAX = 9999999, BODY_MAX = 512, POS
 
 // ───────────────────────── Spieldateien ─────────────────────────
 // Nur diese Dateien werden ausgeliefert – es gibt keinen Weg, über die Adresse an andere heranzukommen.
-const FILES = { '/': 'index.html', '/index.html': 'index.html', '/game.js': 'game.js', '/levels.js': 'levels.js', '/logo.png': 'logo.png' };
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png' };
+const TUNE = 'wir-vom-konstanzer-rec-(remastered).mp3';   // Titelmelodie
+const FILES = { '/': 'index.html', '/index.html': 'index.html', '/game.js': 'game.js', '/levels.js': 'levels.js', '/logo.png': 'logo.png', ['/' + TUNE]: TUNE };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.mp3': 'audio/mpeg' };
+const PACKED = new Set(['.png', '.mp3']);                 // schon komprimiert – gzip lohnt nicht
 const assets = new Map();
 function asset(name) {
   const file = path.join(__dirname, name), mtime = fs.statSync(file).mtimeMs;
@@ -27,7 +29,7 @@ function asset(name) {
   if (!a || a.mtime !== mtime) {                          // geänderte Datei neu einlesen
     const body = fs.readFileSync(file), ext = path.extname(name);
     a = {
-      mtime, body, type: TYPES[ext], gz: ext === '.png' ? null : zlib.gzipSync(body),
+      mtime, body, type: TYPES[ext], gz: PACKED.has(ext) ? null : zlib.gzipSync(body),
       etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"`,
     };
     assets.set(name, a);
@@ -38,7 +40,21 @@ function sendAsset(req, res, name) {
   const a = asset(name);
   // Immer beim Server nachfragen, damit eine neue Version sofort sichtbar ist
   const head = { 'Content-Type': a.type, 'Cache-Control': 'no-cache', ETag: a.etag, Vary: 'Accept-Encoding', 'X-Content-Type-Options': 'nosniff' };
+  if (!a.gz) head['Accept-Ranges'] = 'bytes';
   if (req.headers['if-none-match'] === a.etag) { res.writeHead(304, head); res.end(); return; }
+  // Teilabrufe (Range) – Browser holen Musik stückweise und spulen damit
+  const range = !a.gz && (!req.headers['if-range'] || req.headers['if-range'] === a.etag) && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (range && (range[1] || range[2])) {
+    const size = a.body.length;
+    let from = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    let to = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (from >= size || from > to) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+    head['Content-Range'] = `bytes ${from}-${to}/${size}`;
+    head['Content-Length'] = to - from + 1;
+    res.writeHead(206, head);
+    res.end(req.method === 'HEAD' ? undefined : a.body.subarray(from, to + 1));
+    return;
+  }
   const gz = a.gz && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
   const body = gz ? a.gz : a.body;
   if (gz) head['Content-Encoding'] = 'gzip';

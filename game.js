@@ -12,6 +12,8 @@ const GRAVITY = 2300, JUMP_V = 780, JUMP_CUT = 280, MAX_FALL = 900;
 const MAX_RUN = 290, ACC_GROUND = 1500, ACC_AIR = 1050, ACC_TURN = 2600, FRICTION = 800;
 const COYOTE = 0.09, JUMP_BUF = 0.12;
 const AXEL_V = 380, AXEL_MIN_H = 45;                     // Axel: kleiner Auftrieb, erst ab 1,5 Kacheln über dem Boden
+const TITLE_HOLD = 0.3, LOGO_IN = 1.6, LOGO_BIG = 3.6;      // Startbildschirm: kurze Tastensperre; so lange und von so groß drehen sich die Wappen herein
+const GLIDE_MIN = 0.09, GLIDE_YAW = 0.6;                  // ab diesem Tempo Laufhaltung; so weit dreht sie sich dabei zum Bild
 const SPIN_MAX = 1.15, SPIN_MIN = 0.3, SPIN_CD = 0.4, WAAGE_COST = 1.5;   // die Waage verbraucht den Schwung anderthalbmal so schnell
 const PW = 20, PH = 54;
 const STEP = 1 / 120;
@@ -40,6 +42,15 @@ const THEMES = {
     block: '#f2875a', blockHi: '#ffc09c', blockDark: '#a8482a',
     plat: '#4a3470', platHi: '#8a6cb8', platDark: '#2c1e4a', deco: 'lamps', stars: false,
   },
+  blau: {                                                // blaue Stunde – für den Aufstieg über die Planken
+    song: 'blau',
+    sky: ['#16215e', '#3f6fb8', '#f6b78c'], orb: { x: 92, y: 50, r: 11, col: '#fdf6d8', glow: '#a9c8f2' },
+    cloud: ['#c9d8f5', '#8fa6d8'], far: '#3d5a9a', farHi: '#5a78b8', mid: '#2a3f78', midHi: '#3f5898',
+    midDark: '#1c2a58', midDarkHi: '#2a3a70',
+    top: '#bfe3ff', topHi: '#f0faff', topSh: '#7fb0e0', body: '#4a5a9a', dark: '#34427a', light: '#6274b4',
+    block: '#f2a65a', blockHi: '#ffd49c', blockDark: '#a8642a',
+    plat: '#b8743c', platHi: '#e8a868', platDark: '#7a4622', deco: 'lamps', stars: true,
+  },
   nacht: {
     song: 'nacht',
     sky: ['#05071e', '#111850', '#2a3490'], orb: { x: 395, y: 44, r: 14, col: '#f4f1ff', glow: '#8f9ae8' },
@@ -58,7 +69,7 @@ const hash = (a, b = 0) => { const h = Math.sin(a * 127.1 + b * 311.7) * 43758.5
 const LEVEL_DEFS = globalThis.KJ_LEVELS || [];
 
 function buildLevel(def) {
-  const W = def.width, H = ROWS;
+  const W = def.width, H = Math.max(ROWS, def.height || ROWS);   // höhere Level laufen auch nach oben mit
   const tiles = new Uint8Array(W * H);
   const lvl = {
     name: def.name, theme: THEMES[def.theme] || THEMES.park, par: def.par || 90,
@@ -66,7 +77,7 @@ function buildLevel(def) {
   };
   const set = (x, y, t) => { if (x >= 0 && x < W && y >= 0 && y < H) tiles[y * W + x] = t; };
   const b = {
-    ground(x0, x1, top = 15) { for (let x = x0; x <= x1; x++) for (let y = top; y < H; y++) set(x, y, GROUND); },
+    ground(x0, x1, top = H - 3) { for (let x = x0; x <= x1; x++) for (let y = top; y < H; y++) set(x, y, GROUND); },
     block(x, y, w = 1, h = 1) { for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) set(x + i, y + j, BLOCK); },
     plat(x, y, w = 1) { for (let i = 0; i < w; i++) set(x + i, y, PLAT); },
     star(x, y) { lvl.stars.push({ x: (x + 0.5) * TILE, y: (y + 0.5) * TILE, got: false, ph: x * 0.7 }); },
@@ -84,7 +95,7 @@ function buildLevel(def) {
   };
   def.build(b);
   if (!lvl.spawn) {
-    let row = 15;
+    let row = H - 3;
     for (let y = 0; y < H; y++) if (tiles[y * W + 2] === GROUND) { row = y; break; }
     b.spawn(2, row);
   }
@@ -149,7 +160,8 @@ function moveBody(lvl, b, dt) {
 
 // ───────────────────────── Ton ─────────────────────────
 let actx = null, muted = false;
-function audioInit() {
+function audioInit() {                                   // wird bei jeder Eingabe gerufen – erst dann darf der Browser Ton spielen
+  tuneGesture();
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
   const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!AC) return;
@@ -241,6 +253,11 @@ const SONG_SRC = {
     lead: 'A5:2 C6 | E6:2 C6 | D6:2 F6 | A5:3 | G#5 B5 E6 | D6:2 B5 | C6 B5 A5 | E5:2 - | '
         + 'F5 A5 C6 | F6:2 E6 | E6 C6 G5 | E6:2 D6 | D6 F6 A5 | G#5 B5 D6 | C6 A5 E5 | A5:2 -',
   },
+  blau: {                                                // Hoch hinaus: steigt und steigt, F-Dur
+    bpm: 164, chords: 'F F Bb Bb C C F F Dm Dm Gm Gm Bb C F F',
+    lead: 'F5 A5 C6 | F6:2 C6 | D6 F6 D6 | Bb5:2 D6 | C6 E6 G6 | G6:2 E6 | F6 C6 A5 | F5:2 - | '
+        + 'D5 F5 A5 | D6:2 A5 | Bb5 D6 G6 | G6:2 D6 | F6 D6 Bb5 | C6 E6 G6 | A6 F6 C6 | F6:2 -',
+  },
   nacht: {                                               // Gala bei Nacht: schwungvoll, d-Moll
     bpm: 190, chords: 'Dm Dm Gm Gm A7 A7 Dm Dm Bb Bb F F Gm A7 Dm Dm',
     lead: 'D6 A5 F5 | A5:2 D6 | G5 Bb5 D6 | G6:2 F6 | E6 C#6 A5 | G5:2 A5 | F5 A5 D6 | F6:2 - | '
@@ -271,10 +288,59 @@ function buildSong(src) {
   return { spb: 60 / src.bpm, beats: beats * 2, ev };
 }
 
+// Titelmelodie: das Vereinslied „Wir vom Konstanzer REC" als MP3. Es beginnt bei jedem Erscheinen des
+// Startbildschirms von vorn und blendet beim Spielstart aus.
+const TUNE_SRC = 'wir-vom-konstanzer-rec-(remastered).mp3', TUNE_VOL = 0.55, TUNE_FADE = 0.45;
+const TUNE = { el: null, vol: 0, pending: false, blocked: false, dead: false, first: true, fixedVol: false, rewind: true };
+function tuneInit() {
+  if (typeof Audio === 'undefined') return;
+  const a = new Audio();
+  a.loop = true; a.preload = 'auto'; a.volume = 0;
+  TUNE.fixedVol = a.volume !== 0;                         // iOS lässt die Lautstärke nicht regeln – dort wird hart geschaltet
+  a.addEventListener('error', () => { TUNE.dead = true; });
+  a.src = TUNE_SRC;
+  TUNE.el = a;
+  document.addEventListener('visibilitychange', () => { if (document.hidden && !a.paused) a.pause(); });
+}
+const tuneWanted = () => G.state === 'title' && !muted && !document.hidden;
+function tuneStart() {
+  const a = TUNE.el;
+  if (!a || TUNE.dead || TUNE.pending || TUNE.blocked || !a.paused || !tuneWanted()) return;
+  const first = TUNE.first;
+  TUNE.first = false; TUNE.pending = true; TUNE.vol = 0;
+  if (!TUNE.fixedVol) a.volume = 0;
+  if (TUNE.rewind) { TUNE.rewind = false; try { a.currentTime = 0; } catch (e) { /* noch nicht geladen */ } }   // nach „Ton aus“ geht es dagegen an derselben Stelle weiter
+  const p = a.play();
+  const ok = () => { TUNE.pending = false; };
+  const no = e => {
+    TUNE.pending = false;
+    if (e && e.name === 'NotAllowedError') {              // der Browser will erst eine Eingabe sehen
+      TUNE.blocked = true;
+      if (first && G.state === 'title') G.curtain = true; // dann wartet der Startbildschirm auf einen Tastendruck
+    } else if (!e || e.name !== 'AbortError') TUNE.dead = true;
+  };
+  if (p && p.then) p.then(ok, no); else ok();
+}
+function tuneGesture() {                                  // eine Eingabe: jetzt darf die Musik los, der Vorhang geht auf
+  if (G.curtain) { G.curtain = false; G.stateT = 0; }
+  if (TUNE.blocked) { TUNE.blocked = false; tuneStart(); }
+}
+function tuneTick(dt) {
+  const a = TUNE.el;
+  if (!a || TUNE.dead) return;
+  const want = tuneWanted();
+  if (G.state !== 'title') TUNE.rewind = true;
+  if (want) tuneStart();
+  if (a.paused || TUNE.pending) return;
+  TUNE.vol = clamp(TUNE.vol + (want ? dt : -dt) / TUNE_FADE, 0, 1);
+  if (!want && (TUNE.vol <= 0 || TUNE.fixedVol)) { a.pause(); return; }
+  if (!TUNE.fixedVol) a.volume = TUNE.vol * TUNE_VOL;
+}
+
 const MUS = { key: null, song: null, i: 0, t0: 0, out: null, on: false, songs: {} };
 function musicWant() {
   switch (G.state) {
-    case 'title': return 'park';
+    case 'title': return null;                           // hier läuft die Titelmelodie
     case 'win': return G.stateT > 1.8 ? 'park' : null;   // erst die Siegesfanfare ausklingen lassen
     case 'play': case 'pause': case 'finale': return G.lvl.theme.song;
     default: return null;                                // Zieleinlauf und Sturz haben ihre eigenen Klänge
@@ -323,7 +389,7 @@ const G = {
   state: 'title', stateT: 0, t: 0,
   levelIdx: 0, lvl: null, p: null, enemies: [], particles: [], popups: [],
   cam: 0, shake: 0, wipe: 0, toast: '', toastT: 0, hearts: MAX_HEARTS, score: 0, scoreAtStart: 0, best: 0,
-  time: 0, starsGot: 0, checkpoint: null, marks: [], bonus: 0, sparkT: 0, menu: 0, hsAsked: false, fin: null, stale: null, lockT: 0, zoom: 1, zoomDx: 0, zoomY: 0,
+  time: 0, starsGot: 0, checkpoint: null, marks: [], bonus: 0, sparkT: 0, menu: 0, hsAsked: false, fin: null, stale: null, lockT: 0, zoom: 1, zoomDx: 0, zoomY: 0, curtain: false, camY: 0,
 };
 
 function makePlayer(x, y) {
@@ -333,7 +399,7 @@ function makePlayer(x, y) {
     spinning: false, waage: false, spinT: 0, spinCd: 0, spinLock: false, spinCombo: 0,
     combo: 0, invuln: 0, stride: 0, dead: false, deadRot: 0,
     // nur für die Animation:
-    turnK: 0, sitK: 0, waK: 0, spinYaw: 0, airT: 0, landT: 1, hurtT: 1,
+    turnK: 0, sitK: 0, waK: 0, glideK: 0, spinYaw: 0, airT: 0, landT: 1, hurtT: 1,
   };
 }
 
@@ -356,6 +422,7 @@ function startLevel(idx) {
   G.stale = null; G.lockT = 0;
   G.p = makePlayer(G.checkpoint.x, G.checkpoint.y);
   G.cam = 0; G.shake = 0; G.wipe = 0.6; G.zoom = 1; G.zoomDx = 0;
+  snapCamY();
   G.scoreAtStart = G.score;
   setState('play');
   input.jumpPressed = false;
@@ -366,7 +433,7 @@ function setState(s) { G.state = s; G.stateT = 0; if (s === 'pause') G.menu = 0;
 function showTitle() {
   G.lvl = buildLevel(LEVEL_DEFS[0]);
   G.enemies = G.lvl.enemySpecs.map(makeEnemy);
-  G.p = null; G.particles = []; G.popups = []; G.zoom = 1; G.zoomDx = 0;
+  G.p = null; G.particles = []; G.popups = []; G.zoom = 1; G.zoomDx = 0; G.camY = 0;
   setState('title');
 }
 
@@ -444,6 +511,8 @@ function animatePlayer(p, dt) {
   p.turnK += clamp((p.facing > 0 ? 0 : 1) - p.turnK, -dt * 8, dt * 8);
   p.sitK += clamp((p.spinning && !p.waage ? 1 : 0) - p.sitK, -dt * 8, dt * 10);
   p.waK += clamp((p.spinning && p.waage ? 1 : 0) - p.waK, -dt * 8, dt * 10);
+  const gliding = p.onGround && !p.spinning && !p.dead && Math.abs(p.vx) > MAX_RUN * GLIDE_MIN;
+  p.glideK += clamp((gliding ? 1 : 0) - p.glideK, -dt * 7, dt * 6);   // Arme zur Seite, sobald sie rollt
   if (p.spinning) p.spinYaw += 14 * dt;
   else if (!p.onGround && p.rotating) p.spinYaw += (p.axel ? 15.5 : 10.2) * dt;
   else {                                                 // nach der Drehung zur Blickrichtung zurück
@@ -491,6 +560,7 @@ function respawn() {
   G.p = makePlayer(cp.x, cp.y);
   G.p.invuln = 1.5;
   G.cam = clamp(cp.x - VIEW_W * 0.42, 0, G.lvl.W * TILE - VIEW_W);
+  snapCamY();
   // Wer beim Sturz noch gegengelenkt hat, soll nicht gleich wieder in die Lücke rollen: kurze Atempause,
   // und was schon vor dem Sturz gedrückt war, zählt erst wieder nach dem Loslassen.
   G.lockT = RESPAWN_LOCK;
@@ -573,6 +643,7 @@ function skipFinale() {                                  // ungeduldig? direkt z
   if (a) {
     p.x = a.x + FIN_STOP - p.w / 2; p.y = a.y - p.h; p.vy = 0; p.onGround = true;
     G.cam = clamp(p.x - VIEW_W * 0.42, 0, G.lvl.W * TILE - VIEW_W);
+    snapCamY();
   }
   p.vx = 0; p.facing = 1; p.rotating = false; p.axel = false; p.jumping = false;
   finishLevel();
@@ -599,7 +670,7 @@ function updateEnemy(lvl, e, dt) {
   e.turnK += clamp((e.dir > 0 ? 0 : 1) - e.turnK, -dt * 7, dt * 7);
   if (e.state === 'spun') {
     e.vy += GRAVITY * dt; e.x += e.vx * dt; e.y += e.vy * dt; e.rot += e.spinDir * 15 * dt;
-    if (e.y > ROWS * TILE + 80) e.gone = true;
+    if (e.y > lvl.H * TILE + 80) e.gone = true;
     return;
   }
   if (e.state === 'squash') { e.st += dt; if (e.st > 0.45) e.gone = true; return; }
@@ -617,7 +688,7 @@ function updateEnemy(lvl, e, dt) {
     const px = e.dir > 0 ? e.x + e.w + 1 : e.x - 1;
     if (tileAt(lvl, Math.floor(px / TILE), Math.floor((e.y + e.h + 2) / TILE)) === EMPTY) e.dir = -e.dir;
   }
-  if (e.y > ROWS * TILE + 80) e.gone = true;
+  if (e.y > lvl.H * TILE + 80) e.gone = true;
 }
 
 // ───────────────────────── Update ─────────────────────────
@@ -729,25 +800,32 @@ function updatePlay(dt) {
 
   // Ziel
   const goal = lvl.goal;
-  if (goal && pcx >= goal.x - 6 && pby <= goal.y + 6 && pby > goal.y - 5 * TILE) { startFinale(); return; }
+  if (goal && pcx >= goal.x - 6 && pby <= goal.y + 0.01 && pby > goal.y - 5 * TILE) { startFinale(); return; }   // nicht schon beim Durchspringen von unten
 
   // In die Lücke gefallen
-  if (p.y > ROWS * TILE + 50) {
+  if (p.y > lvl.H * TILE + 50) {
     G.hearts--; G.shake = 0.25;
     if (G.hearts <= 0) { p.dead = true; gameOver(); }
     else { sfx('fall'); respawn(); }
   }
 }
 
+// Senkrechte Kamera: Die Rollen stehen auf etwa zwei Dritteln der Bildhöhe. In normal hohen Leveln bleibt sie bei 0.
+const camYFor = p => clamp(p.y + p.h - VIEW_H * 0.64, 0, G.lvl.H * TILE - VIEW_H);
+function snapCamY() { G.camY = G.p ? camYFor(G.p) : 0; }
 function updateCamera(dt) {
   const p = G.p;
   if (!p || p.dead) return;
   const target = clamp(p.x + p.w / 2 - VIEW_W * 0.42 + p.facing * 46, 0, G.lvl.W * TILE - VIEW_W);
   G.cam += (target - G.cam) * Math.min(1, dt * 5.5);
+  const ty = camYFor(p);
+  G.camY += (ty - G.camY) * Math.min(1, dt * (ty > G.camY ? 10 : 4.5));   // beim Fallen zügig hinterher
+  if (Math.abs(ty - G.camY) < 0.05) G.camY = ty;
 }
 
 function update(dt) {
   G.t += dt; G.stateT += dt;
+  if (G.curtain) G.stateT = 0;                            // der Startbildschirm wartet noch auf die erste Eingabe
   const lvl = G.lvl;
   switch (G.state) {
     case 'play':
@@ -803,7 +881,7 @@ function update(dt) {
 function confirm() {
   if (HS.open) return;
   switch (G.state) {
-    case 'title': G.score = 0; G.hsAsked = false; startLevel(0); break;
+    case 'title': if (G.stateT > TITLE_HOLD) { G.score = 0; G.hsAsked = false; startLevel(0); } break;
     case 'pause': MENU[G.menu][1](); break;
     case 'over': if (G.stateT > 0.9) { G.score = G.scoreAtStart; startLevel(G.levelIdx); } break;
     case 'finale': if (G.stateT > 0.6) skipFinale(); break;
@@ -1100,7 +1178,8 @@ function skaterPose(name, o) {
         hip: [0, 12.8 + Math.abs(a) * 0.5, 0], chest: [1.2 + lean * 0.9, 19.1 + Math.abs(a) * 0.4, 0], head: [0.9, 4.1, 0],
         fa: [a * 3.8, 3.2 + Math.max(0, -a) * 2.4, 1.5 + Math.max(0, -a)], fb: [-a * 3.8, 3.2 + Math.max(0, a) * 2.4, -1.5 - Math.max(0, a)],
         da: [1, Math.min(0, a) * 0.5, 0], db: [1, Math.min(0, -a) * 0.5, 0],
-        ha: [1 - a * 3.4, 14.6, 3.5], hb: [1 + a * 3.4, 14.6, -3.5], flare: 0.15,
+        // Laufhaltung: beide Arme seitlich gestreckt, knapp unter Schulterhöhe – sie wiegen nur leicht im Takt mit
+        ha: [1.6 + lean * 0.9, 19.3 + a * 0.5, 10.3], hb: [1.6 + lean * 0.9, 19.3 - a * 0.5, -10.3], flare: 0.15,
       };
     }
     case 'takeoff': return {
@@ -1243,7 +1322,8 @@ function drawPlayer(c, cam) {
         else if (p.airT < 0.1) P = mixPose(skaterPose('takeoff', o), P, p.airT / 0.1);
       } else P = skaterPose('fall', o);
     } else {
-      P = skaterPose(speed > 0.09 ? 'skate' : 'idle', o);
+      P = mixPose(skaterPose('idle', o), skaterPose('skate', o), smooth(p.glideK));
+      yaw += (2 * p.turnK - 1) * GLIDE_YAW * smooth(p.glideK);   // leicht zum Bild gedreht, damit man die gestreckten Arme sieht
       if (p.landT < 0.34) P = mixPose(skaterPose('land', o), P, smooth((p.landT - 0.12) / 0.22));
     }
     if (p.sitK > 0) P = mixPose(P, skaterPose('sit', o), smooth(p.sitK));
@@ -1447,8 +1527,8 @@ function assets(th) {
   });
 }
 
-function drawBackground(c, th, camW, t) {
-  const A = assets(th), cam = camW / PXS;
+function drawBackground(c, th, camW, t, rise = 0) {     // rise: so viele Bildpixel ist die Kamera über dem Boden
+  const A = assets(th), cam = camW / PXS, riseF = Math.round(rise * 0.14), riseM = Math.round(rise * 0.3);
   c.drawImage(A.sky, 0, 0);
   if (th.stars) for (let i = 0; i < 16; i++) if (Math.sin(t * (1 + hash(i, 3) * 2) + i * 2) > 0.2) R(c, Math.floor(hash(i, 11) * LW), Math.floor(hash(i, 12) * 150), 1, 1, '#ffffff');
   for (let i = 0; i < 6; i++) {
@@ -1464,21 +1544,22 @@ function drawBackground(c, th, camW, t) {
     }
     c.globalAlpha = 1;
   }
-  const farY = wx => Math.round(172 + Math.sin(wx * 0.008) * 19 + Math.sin(wx * 0.022 + 1) * 8);
-  const midY = wx => Math.round(209 + Math.sin(wx * 0.012 + 2) * 11 + Math.sin(wx * 0.034) * 4.5);
+  const farY = wx => riseF + Math.round(172 + Math.sin(wx * 0.008) * 19 + Math.sin(wx * 0.022 + 1) * 8);
+  const midY = wx => riseM + Math.round(209 + Math.sin(wx * 0.012 + 2) * 11 + Math.sin(wx * 0.034) * 4.5);
   const camF = Math.floor(cam * 0.18), camM = Math.floor(cam * 0.42);
-  for (let x = 0; x < LW; x += 2) { const y = farY(x + camF); R(c, x, y, 2, LH - y, th.far); R(c, x, y, 2, 2, th.farHi); }
+  for (let x = 0; x < LW; x += 2) { const y = farY(x + camF); if (y < LH) { R(c, x, y, 2, LH - y, th.far); R(c, x, y, 2, 2, th.farHi); } }
   if (th.deco === 'city') {
     const i0 = Math.floor(camM / 37) - 1;
     for (let i = i0; i < i0 + 16; i++) {
       const bx = i * 37 - camM, bw = 23 + Math.floor(hash(i, 4) * 13), bh = 45 + Math.floor(hash(i, 5) * 90);
-      R(c, bx, 236 - bh, bw, bh + 40, th.midDark); R(c, bx, 236 - bh, 1, bh, th.midDarkHi);
+      const by = 236 - bh + riseM;
+      R(c, bx, by, bw, bh + 40, th.midDark); R(c, bx, by, 1, bh, th.midDarkHi);
       for (let r = 0; r < Math.floor(bh / 9) - 1; r++) for (let q = 0; q < Math.floor(bw / 6) - 1; q++) {
-        if (hash(i * 31 + r, q) > 0.58) R(c, bx + 4 + q * 6, 236 - bh + 5 + r * 9, 2, 4, hash(i + r, q * 7) > 0.5 ? '#ffd86b' : '#6fd6ea');
+        if (hash(i * 31 + r, q) > 0.58) R(c, bx + 4 + q * 6, by + 5 + r * 9, 2, 4, hash(i + r, q * 7) > 0.5 ? '#ffd86b' : '#6fd6ea');
       }
     }
   }
-  for (let x = 0; x < LW; x += 2) { const y = midY(x + camM); R(c, x, y, 2, LH - y, th.mid); R(c, x, y, 2, 2, th.midHi); }
+  for (let x = 0; x < LW; x += 2) { const y = midY(x + camM); if (y < LH) { R(c, x, y, 2, LH - y, th.mid); R(c, x, y, 2, 2, th.midHi); } }
   if (th.deco !== 'city') {
     const i0 = Math.floor(camM / 85) - 1;
     for (let i = i0; i < i0 + 9; i++) {
@@ -1495,11 +1576,12 @@ function drawBackground(c, th, camW, t) {
   }
 }
 
-function drawTiles(c, lvl, cam) {
+function drawTiles(c, lvl, cam, camY = 0) {
   const th = lvl.theme, T = assets(th).tiles, W = lvl.W, A = lvl.arena;
   const RT = A ? (rinkTiles || (rinkTiles = buildTiles(RINK))) : null;
   const x0 = Math.max(0, Math.floor(cam / TPX) - 1), x1 = Math.min(W - 1, Math.floor((cam + LW) / TPX) + 1);
-  for (let ty = 0; ty < lvl.H; ty++) for (let tx = x0; tx <= x1; tx++) {
+  const y0r = Math.max(0, Math.floor(camY / TPX) - 1), y1r = Math.min(lvl.H - 1, Math.floor((camY + LH) / TPX) + 1);
+  for (let ty = y0r; ty <= y1r; ty++) for (let tx = x0; tx <= x1; tx++) {
     const t = lvl.tiles[ty * W + tx];
     if (!t) continue;
     const x = tx * TPX - cam, y = ty * TPX;
@@ -1758,7 +1840,7 @@ function drawSignBubbles(c, lvl, cam) {
   const p = G.p;
   if (!p || G.state !== 'play') return;
   for (const s of lvl.signs) {
-    if (Math.abs(s.x - (p.x + p.w / 2)) > 100) continue;
+    if (Math.abs(s.x - (p.x + p.w / 2)) > 100 || Math.abs(s.y - (p.y + p.h)) > 4 * TILE) continue;
     const str = s.text.toUpperCase(), w = textW(str) + 12, sx = wpx(s.x) - cam;
     const x = clamp(sx - (w >> 1), 4, LW - w - 4), y = wpx(s.y) - 52;
     R(c, x - 1, y, w + 2, 15, INK); R(c, x, y - 1, w, 17, INK);
@@ -1771,11 +1853,12 @@ function drawSignBubbles(c, lvl, cam) {
 function drawWorld(c) {
   const lvl = G.lvl;
   let cam = Math.floor(G.cam / PXS), oy = 0;
-  drawBackground(c, lvl.theme, G.cam, G.t);
+  const camY = Math.floor(G.camY / PXS);                 // senkrecht verschiebt sich einfach die ganze Welt
+  drawBackground(c, lvl.theme, G.cam, G.t, wpx(lvl.H * TILE - VIEW_H) - camY);
   if (G.shake > 0) { cam += Math.round((Math.random() - 0.5) * G.shake * 14); oy = Math.round((Math.random() - 0.5) * G.shake * 14); }
-  c.save(); c.translate(0, oy);
+  c.save(); c.translate(0, oy - camY);
   drawArena(c, lvl, cam);
-  drawTiles(c, lvl, cam);
+  drawTiles(c, lvl, cam, camY);
   drawArenaFloor(c, lvl, cam);
   drawDeco(c, lvl, cam);
   for (const e of G.enemies) drawEnemy(c, e, cam);
@@ -1851,16 +1934,28 @@ function drawTitle(c) {
     x += w + 5;
   }
   drawText(c, 'Die große Rollkunstlauf-Kür', LW / 2, 57, { align: 'center' });
-  for (const lx of [94, LW - 94]) {                      // Vereinswappen links und rechts der Vorführung
-    drawLogo(c, lx - 32, 84, 64);
+  // Vereinswappen links und rechts der Vorführung: Sie drehen sich von groß auf ihren Platz und blenden dabei ein
+  const lk = clamp(G.stateT / LOGO_IN, 0, 1), le = 1 - (1 - lk) * (1 - lk);
+  for (const lx of [94, LW - 94]) {
+    if (lk >= 1) drawLogo(c, lx - 32, 84, 64);
+    else {
+      const sc = LOGO_BIG + (1 - LOGO_BIG) * le;
+      c.save();
+      c.globalAlpha = smooth(lk / 0.6);
+      c.translate(lx, 116); c.rotate((lx < LW / 2 ? -1 : 1) * (1 - le) * TAU); c.scale(sc, sc);
+      drawLogo(c, -32, -32, 64);
+      c.restore();
+    }
+    c.globalAlpha = smooth((lk - 0.75) / 0.25);
     drawText(c, 'Konstanzer Roll-', lx, 152, { align: 'center' });
     drawText(c, 'und Eissportclub', lx, 162, { align: 'center' });
+    c.globalAlpha = 1;
   }
 
   // Vorführung: rollen – Rittberger – Axel – Sitzpirouette
   const ph = t % 10.4, cx = LW / 2, gy = 162, o = { t, stride: t * 8, lean: 0.8 };
   let label, P, yaw = 0, h = 0, tail = [-1.1, -0.5, 0];
-  if (ph < 2.4) { P = skaterPose('skate', o); label = 'Rollen'; }
+  if (ph < 2.4) { P = skaterPose('skate', o); yaw = -GLIDE_YAW; label = 'Rollen'; }
   else if (ph < 3.6) {
     const k = (ph - 2.4) / 1.2;
     h = Math.round(Math.sin(k * Math.PI) * 5);
@@ -1885,7 +1980,9 @@ function drawTitle(c) {
   c.drawImage(renderSkater(P, yaw, 0, false, tail, 0.8), 0, 0, SKATER_PX, SKATER_PX, cx - 72, gy - 120 - h * 3, 144, 144);
   drawText(c, label, cx, gy + 10, { col: '#8ef3ff', align: 'center' });
 
-  if (blinkOn()) drawText(c, isTouch ? 'Tippen zum Start' : 'Enter drücken zum Start', cx, 188, { col: '#ffd23f', align: 'center', scale: 2 });
+  const away = !isTouch && typeof document !== 'undefined' && document.hasFocus && !document.hasFocus();   // eingebettet: Tasten kommen erst nach einem Klick an
+  const prompt = away ? 'Hier klicken' : G.curtain ? (isTouch ? 'Tippen' : 'Taste drücken') : isTouch ? 'Tippen zum Start' : 'Enter drücken zum Start';
+  if (blinkOn()) drawText(c, prompt, cx, 188, { col: '#ffd23f', align: 'center', scale: 2 });
   if (isTouch) {
     legendRow(c, 207, [['k', '← →'], ['t', 'Rollen'], ['k', 'A'], ['t', 'Rittberger – auf Gegner springen']]);
     legendRow(c, 220, [['k', 'A'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich']]);
@@ -1893,7 +1990,7 @@ function drawTitle(c) {
     legendRow(c, 246, [['k', 'B'], ['k', 'A'], ['t', 'Waage – doppelte Punkte · nochmal A: Sprung']]);
   } else {
     legendRow(c, 207, [['k', '←'], ['k', '→'], ['t', 'Rollen'], ['k', 'Leertaste'], ['t', 'Rittberger – auf Gegner springen']]);
-    legendRow(c, 220, [['k', 'Leertaste'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich']]);
+    legendRow(c, 220, [['k', 'Leertaste'], ['t', 'nochmal in der Luft: Axel – trifft Tauben auch seitlich'], ['k', 'F'], ['t', 'Vollbild']]);
     legendRow(c, 233, [['k', '↓'], ['t', 'Sitzpirouette – Gegner wegdrehen'], ['k', 'P'], ['t', 'Pause'], ['k', 'M'], ['t', 'Ton'], ['k', 'H'], ['t', 'Bestenliste']]);
     legendRow(c, 246, [['k', '↓'], ['k', 'Leertaste'], ['t', 'Waage – doppelte Punkte · nochmal Leertaste: Sprung']]);
   }
@@ -1967,7 +2064,7 @@ function drawScene(c) {
   wc.imageSmoothingEnabled = false;
   drawWorld(wc);
   const w = LW / z, h = LH / z;
-  const fx = wpx(p.x + p.w / 2) - Math.floor(G.cam / PXS) + G.zoomDx, fy = wpx(G.zoomY);
+  const fx = wpx(p.x + p.w / 2) - Math.floor(G.cam / PXS) + G.zoomDx, fy = wpx(G.zoomY) - Math.floor(G.camY / PXS);
   c.drawImage(cv, Math.round(clamp(fx - w / 2, 0, LW - w)) * HD, Math.round(clamp(fy - h * 0.74, 0, LH - h)) * HD, w * HD, h * HD, 0, 0, LW, LH);
 }
 
@@ -2107,6 +2204,19 @@ const KEYMAP = {
   ArrowDown: 'spin', KeyS: 'spin', KeyX: 'spin', ShiftLeft: 'spin', ShiftRight: 'spin',
 };
 let isTouch = false;
+const embedded = (() => { try { return typeof window !== 'undefined' && window.self !== window.top; } catch (e) { return true; } })();   // läuft in einem <iframe>
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+const canFullscreen = typeof document !== 'undefined' && (document.fullscreenEnabled !== undefined ? document.fullscreenEnabled : !!document.webkitFullscreenEnabled);
+function toggleFullscreen() {
+  const root = document.documentElement;
+  if (fsElement()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  if (!canFullscreen) { if (embedded) window.open(window.location.href, '_blank', 'noopener'); return; }
+  const lock = () => { const o = window.screen.orientation; if (o && o.lock) o.lock('landscape').catch(() => {}); };
+  try {
+    const r = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
+    if (r && r.then) r.then(lock, () => {});
+  } catch (e) { /* vom Browser abgelehnt */ }
+}
 function press(k) {
   if (HS.open) return;
   if (k === 'jump') {
@@ -2198,6 +2308,7 @@ function boot() {
     else if (e.code === 'KeyM') toggleMute();
     else if (e.code === 'KeyR') restartLevel();
     else if (e.code === 'KeyH') hsOpen('list');
+    else if (e.code === 'KeyF') toggleFullscreen();
   });
   window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) setKey(0, k, false); });
   window.addEventListener('blur', () => {
@@ -2210,6 +2321,7 @@ function boot() {
   const menuUnder = e => { const r = canvas.getBoundingClientRect(); return menuAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
   canvas.addEventListener('pointerdown', e => {
     e.preventDefault(); audioInit();
+    if (!document.hasFocus()) window.focus();             // eingebettet: sonst kämen danach keine Tasten an
     if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0 && !HS.open) { G.menu = i; MENU[i][1](); } }   // nur die Knöpfe zählen
     else if (G.state !== 'play') confirm();
   });
@@ -2241,28 +2353,27 @@ function boot() {
   hsInit();
   const muteBtn = document.getElementById('muteBtn');
   if (muteBtn) muteBtn.addEventListener('pointerdown', e => { e.preventDefault(); audioInit(); toggleMute(); });
-  const fsBtn = document.getElementById('fsBtn'), root = document.documentElement;
-  if (fsBtn) {
-    if (!root.requestFullscreen) fsBtn.style.display = 'none';
-    fsBtn.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      if (document.fullscreenElement) document.exitFullscreen();
-      else root.requestFullscreen().then(() => { if (window.screen.orientation && window.screen.orientation.lock) window.screen.orientation.lock('landscape').catch(() => {}); }).catch(() => {});
-    });
-  }
+  // Vollbild – als Knopf (Touch und Maus) und mit der Taste F. Eingebettet in eine fremde Seite geht das nur, wenn
+  // deren <iframe> es erlaubt (allow="fullscreen"); sonst öffnet der Knopf das Spiel in einem eigenen Tab.
+  const fsBtns = ['fsBtn', 'fsCorner'].map(id => document.getElementById(id)).filter(Boolean);
+  if (!canFullscreen && !embedded) fsBtns.forEach(b => { b.style.display = 'none'; });
+  fsBtns.forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); toggleFullscreen(); }));
+  for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { document.body.classList.toggle('fs', !!fsElement()); resize(); });
 
   loadBest();
   loadMuted();
   loadLogo();
+  tuneInit();
   showTitle();
 
   let last = performance.now(), acc = 0;
   function frame(now) {
-    acc += Math.min(0.05, Math.max(0, (now - last) / 1000));
+    const real = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    acc += real;
     last = now;
     pollGamepads();
     while (acc >= STEP) { update(STEP); acc -= STEP; }
-    musicTick();
+    musicTick(); tuneTick(real);
     ctx.setTransform(HD, 0, 0, HD, 0, 0);
     render(ctx);
     requestAnimationFrame(frame);
@@ -2273,7 +2384,7 @@ function boot() {
 // Für Tests und zum Basteln in der Konsole
 globalThis.KJ = {
   G, input, LEVEL_DEFS, buildLevel, makePlayer, stepPlayer, tileAt, update, render, startLevel, showTitle, confirm, setKey,
-  SONG_SRC, buildSong, textW, music: MUS, clap: CLAP, DANCE_T, BOW_T,
+  SONG_SRC, buildSong, textW, music: MUS, tune: TUNE, clap: CLAP, DANCE_T, BOW_T,
   consts: { TILE, ROWS, VIEW_W, VIEW_H, PW, PH, MAX_RUN, STEP, GROUND, BLOCK, PLAT, EMPTY },
 };
 

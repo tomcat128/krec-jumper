@@ -2,7 +2,7 @@
 FROM node:22-alpine
 
 WORKDIR /app
-COPY server.js index.html game.js levels.js logo.png ./
+COPY ["server.js", "index.html", "game.js", "levels.js", "logo.png", "wir-vom-konstanzer-rec-(remastered).mp3", "./"]
 
 # Die Bestenliste liegt in /data (als Volume einhängen, damit sie einen Neubau übersteht)
 RUN mkdir -p /data && chown node:node /data

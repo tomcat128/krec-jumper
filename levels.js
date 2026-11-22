@@ -3,10 +3,12 @@
  * Level-Definitionen für KREC Jumper.
  *
  * Koordinaten sind Kacheln (30 px). Das Spielfeld ist 18 Zeilen hoch (0 = oben).
- * Der normale Boden beginnt in Zeile 15.
+ * Der normale Boden beginnt in Zeile 15. Mit „height" wird ein Level höher als das Bild – dann fährt
+ * die Kamera auch nach oben mit, und der Boden liegt in den untersten drei Zeilen (height − 3).
+ * Bei „width: 32" ist das Level genau ein Bild breit.
  *
  * Bausteine:
- *   b.ground(x0, x1, top = 15)   Boden von Spalte x0 bis x1, Oberkante in Zeile top
+ *   b.ground(x0, x1, top)        Boden von Spalte x0 bis x1, Oberkante in Zeile top (sonst drei Zeilen über dem unteren Rand)
  *   b.block(x, y, w = 1, h = 1)  feste Kisten
  *   b.plat(x, y, w)              Planke – von unten durchspringbar
  *   b.star(x, y) / b.stars(x, y, n) / b.arc(x, y, n)   Sterne (einzeln, Reihe, Bogen)
@@ -21,7 +23,8 @@
  *                                am Eingang, läuft dahinter der Abspann: Einrollen, Verbeugung, Applaus, Noten
  *
  * Faustregeln, damit alles schaffbar bleibt: Lücken höchstens 4 Kacheln breit,
- * Stufen höchstens 3 Kacheln hoch. Gegner dürfen nie als Trittstein nötig sein.
+ * Stufen höchstens 3 Kacheln hoch (dann höchstens 3 Kacheln Abstand zur Seite). Gegner dürfen nie als
+ * Trittstein nötig sein. Steht das Ziel auf einer Planke, braucht es rechts davon noch gut vier Kacheln Auslauf.
  */
 globalThis.KJ_LEVELS = [
   {
@@ -197,6 +200,88 @@ globalThis.KJ_LEVELS = [
       b.cone(211, 15);
       b.block(214, 14);
       b.goal(222, 15);
+    },
+  },
+
+  {
+    // Der Aufstieg: ein Bild breit, fünfeinhalb Bilder hoch. Es geht in Dreierstufen nach oben; alle sechs Stufen
+    // fängt ein durchgehender Boden einen Sturz auf. Ganz oben auf der obersten Planke steht das Ziel.
+    // Auf den Böden halten Kisten die Gegner von der Stelle fern, an der man von unten ankommt.
+    name: 'Hoch hinaus',
+    theme: 'blau',
+    width: 32,
+    height: 105,
+    par: 100,
+    build(b) {
+      b.ground(0, 31);                                   // Zeile 102
+      b.sign(5, 102, 'Hoch hinaus! Spring über die Planken nach oben – ganz oben wartet das Ziel.');
+      b.stars(9, 100, 3);
+
+      // 1 – breite Planken zum Warmwerden
+      b.plat(7, 99, 5);    b.stars(8, 97, 3);
+      b.plat(14, 96, 5);   b.stars(15, 94, 3);
+      b.plat(21, 93, 5);   b.stars(22, 91, 3);
+      b.plat(26, 90, 5);   b.star(28, 88);
+      b.plat(19, 87, 4);   b.stars(20, 85, 2);
+      b.bird(5, 92, 2.5);
+
+      b.plat(0, 84, 32);                                 // erster Boden
+      b.block(12, 83);
+      b.cone(8, 84);
+      b.sign(2, 84, 'Die durchgehenden Böden fangen dich auf, wenn du abrutschst.');
+
+      // 2 – Kistentreppe: Kisten sind fest, von unten kommt man nicht durch
+      b.block(5, 81, 3);   b.star(6, 79);
+      b.block(11, 78, 3);  b.star(12, 76);
+      b.block(17, 75, 2);  b.star(17.5, 73);
+      b.block(22, 72, 2);  b.star(22.5, 70);
+      b.block(27, 69, 3);  b.star(28, 67);
+      b.bird(11, 71, 2.5);
+
+      b.plat(0, 66, 32);                                 // zweiter Boden
+      b.block(16, 65);
+      b.ball(8, 66);
+      b.stars(11, 64, 3);
+
+      // 3 – Planken mit Hütchen
+      b.plat(20, 63, 6);   b.cone(23, 63);
+      b.plat(11, 60, 6);   b.cone(14, 60);
+      b.plat(3, 57, 5);    b.heart(5, 55);
+      b.plat(10, 54, 4);   b.stars(11, 52, 2);
+      b.plat(16, 51, 4);   b.stars(17, 49, 2);
+      b.bird(25, 55, 3);
+      b.stars(24, 53, 3);                                // für Mutige
+
+      b.plat(0, 48, 32);                                 // dritter Boden
+      b.block(10, 47);     b.cone(6, 48);    b.stars(3, 46, 3);
+      b.block(23, 47);     b.cone(27, 48);   b.stars(26, 46, 3);
+
+      // 4 – schmalere Planken im Zickzack
+      b.plat(12, 45, 3);   b.star(13, 43);
+      b.plat(6, 42, 3);    b.star(7, 40);
+      b.plat(1, 39, 3);    b.star(2, 37);
+      b.plat(7, 36, 3);    b.star(8, 34);
+      b.plat(13, 33, 3);   b.star(14, 31);
+      b.bird(20, 41, 3);
+      b.bird(21, 35, 2.5);
+      b.stars(18, 38, 3);                                // nur im Sprung zu holen
+
+      b.plat(0, 30, 32);                                 // vierter Boden
+      b.block(10, 29);     b.ball(6, 30);    b.stars(3, 28, 3);
+      b.block(23, 29);     b.cone(27, 30);   b.heart(30, 28);
+
+      // 5 – kleine Planken, dazwischen Tauben
+      b.plat(20, 27, 2);   b.star(20.5, 25);
+      b.plat(25, 24, 2);   b.star(25.5, 22);
+      b.plat(20, 21, 2);   b.star(20.5, 19);
+      b.plat(15, 18, 2);   b.star(15.5, 16);
+      b.plat(9, 15, 3);    b.star(10, 13);
+      b.bird(27, 19, 2);
+      b.bird(8, 20, 3);
+
+      b.plat(14, 12, 18);                                 // die oberste Planke – bis an den rechten Rand
+      b.arc(16, 10, 4);
+      b.goal(24, 12);
     },
   },
 
