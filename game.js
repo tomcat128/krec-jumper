@@ -160,8 +160,10 @@ function moveBody(lvl, b, dt) {
 
 // ───────────────────────── Ton ─────────────────────────
 let actx = null, muted = false;
-function audioInit() {                                   // wird bei jeder Eingabe gerufen – erst dann darf der Browser Ton spielen
-  tuneGesture();
+// Wird bei jeder Eingabe gerufen – erst dann darf der Browser Ton spielen. Gamepad-Tasten zählen für die meisten
+// Browser nicht als solche Eingabe (real = false): Dann wird nur weitergemacht, falls der Ton schon freigegeben ist.
+function audioInit(real = true) {
+  tuneGesture(real);
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
   const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!AC) return;
@@ -290,41 +292,52 @@ function buildSong(src) {
 
 // Titelmelodie: das Vereinslied „Wir vom Konstanzer REC" als MP3. Es beginnt bei jedem Erscheinen des
 // Startbildschirms von vorn und blendet beim Spielstart aus.
-const TUNE_SRC = 'wir-vom-konstanzer-rec-(remastered).mp3', TUNE_VOL = 0.55, TUNE_FADE = 0.45;
-const TUNE = { el: null, vol: 0, pending: false, blocked: false, dead: false, first: true, fixedVol: false, rewind: true };
+// Wichtig: Sie startet leise, aber nie stumm. Einen stummen Start lassen Browser ohne Eingabe zu und halten das Stück
+// dann an, sobald es hörbar wird – das gäbe ein endloses An und Aus. So entscheidet der Browser gleich beim Start.
+const TUNE_SRC = 'wir-vom-konstanzer-rec-(remastered).mp3', TUNE_VOL = 0.55, TUNE_FADE = 0.45, TUNE_MIN = 0.06;
+const TUNE = { el: null, vol: 0, pending: false, blocked: false, dead: false, first: true, fixedVol: false, rewind: true, selfPause: false };
 function tuneInit() {
   if (typeof Audio === 'undefined') return;
   const a = new Audio();
   a.loop = true; a.preload = 'auto'; a.volume = 0;
   TUNE.fixedVol = a.volume !== 0;                         // iOS lässt die Lautstärke nicht regeln – dort wird hart geschaltet
   a.addEventListener('error', () => { TUNE.dead = true; });
+  // Hält der Browser das Stück von sich aus an, gilt der Ton als gesperrt – erst eine echte Eingabe startet es wieder
+  a.addEventListener('pause', () => { if (!TUNE.selfPause && !TUNE.pending && tuneWanted()) tuneBlocked(); TUNE.selfPause = false; });
   a.src = TUNE_SRC;
   TUNE.el = a;
-  document.addEventListener('visibilitychange', () => { if (document.hidden && !a.paused) a.pause(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && !a.paused) tunePause(); });
 }
 const onTitle = () => G.state === 'title' || G.state === 'select';   // Startbildschirm und Figurenwahl
 const tuneWanted = () => onTitle() && !muted && !document.hidden;
+function tunePause() { const a = TUNE.el; if (a && !a.paused) { TUNE.selfPause = true; a.pause(); } }
+function tuneBlocked() {
+  TUNE.blocked = true;
+  if (TUNE.first && onTitle()) G.curtain = true;          // beim ersten Mal wartet der Startbildschirm auf einen Tastendruck
+  TUNE.first = false;
+}
+// Hat der Browser schon eine echte Eingabe gesehen? (unbekannt = null)
+const userActive = () => (typeof navigator !== 'undefined' && navigator.userActivation ? navigator.userActivation.hasBeenActive : null);
+// Für den Hinweis am Bildschirm: Ton ist gewünscht, aber der Browser gibt ihn noch nicht frei
+const soundLocked = () => !muted && (TUNE.blocked || (!!actx && actx.state === 'suspended' && userActive() === false));
 function tuneStart() {
   const a = TUNE.el;
   if (!a || TUNE.dead || TUNE.pending || TUNE.blocked || !a.paused || !tuneWanted()) return;
-  const first = TUNE.first;
-  TUNE.first = false; TUNE.pending = true; TUNE.vol = 0;
-  if (!TUNE.fixedVol) a.volume = 0;
+  TUNE.pending = true; TUNE.vol = TUNE_MIN;
+  if (!TUNE.fixedVol) a.volume = TUNE_MIN * TUNE_VOL;
   if (TUNE.rewind) { TUNE.rewind = false; try { a.currentTime = 0; } catch (e) { /* noch nicht geladen */ } }   // nach „Ton aus“ geht es dagegen an derselben Stelle weiter
   const p = a.play();
-  const ok = () => { TUNE.pending = false; };
+  const ok = () => { TUNE.pending = false; TUNE.first = false; };
   const no = e => {
     TUNE.pending = false;
-    if (e && e.name === 'NotAllowedError') {              // der Browser will erst eine Eingabe sehen
-      TUNE.blocked = true;
-      if (first && onTitle()) G.curtain = true; // dann wartet der Startbildschirm auf einen Tastendruck
-    } else if (!e || e.name !== 'AbortError') TUNE.dead = true;
+    if (e && e.name === 'NotAllowedError') tuneBlocked(); // der Browser will erst eine Eingabe sehen
+    else if (!e || e.name !== 'AbortError') TUNE.dead = true;
   };
   if (p && p.then) p.then(ok, no); else ok();
 }
-function tuneGesture() {                                  // eine Eingabe: jetzt darf die Musik los, der Vorhang geht auf
+function tuneGesture(real) {                              // eine Eingabe: der Vorhang geht auf, und wenn der Browser mitspielt, die Musik los
   if (G.curtain) { G.curtain = false; G.stateT = 0; }
-  if (TUNE.blocked) { TUNE.blocked = false; tuneStart(); }
+  if (TUNE.blocked && (real || userActive() === true)) { TUNE.blocked = false; tuneStart(); }
 }
 function tuneTick(dt) {
   const a = TUNE.el;
@@ -334,7 +347,7 @@ function tuneTick(dt) {
   if (want) tuneStart();
   if (a.paused || TUNE.pending) return;
   TUNE.vol = clamp(TUNE.vol + (want ? dt : -dt) / TUNE_FADE, 0, 1);
-  if (!want && (TUNE.vol <= 0 || TUNE.fixedVol)) { a.pause(); return; }
+  if (!want && (TUNE.vol <= TUNE_MIN || TUNE.fixedVol)) { tunePause(); return; }
   if (!TUNE.fixedVol) a.volume = TUNE.vol * TUNE_VOL;
 }
 
@@ -441,6 +454,7 @@ function showTitle() {
 
 // Figurenwahl vor dem Start – die letzte Wahl wird gemerkt
 const HEROES = ['Läuferin', 'Läufer'];
+const SOUND_HINT = 'Kein Ton? Einmal klicken oder eine Taste drücken.';   // z. B. wenn nur mit dem Gamepad gespielt wird
 function loadHero() { try { G.hero = localStorage.getItem('krec-jumper-figur') === '1' ? 1 : 0; } catch (e) { G.hero = 0; } }
 function pickHero(i) {
   i = clamp(i, 0, HEROES.length - 1);
@@ -1941,6 +1955,7 @@ function drawHud(c) {
     drawText(c, lvl.name, LW / 2, 84, { scale: 2, align: 'center' });
   }
   if (G.toastT > 0) drawText(c, G.toast, LW / 2, LH - 16, { col: '#8ef3ff', align: 'center' });
+  else if (G.state === 'play' && G.stateT > 2.8 && G.stateT < 9 && soundLocked()) drawText(c, SOUND_HINT, LW / 2, LH - 16, { col: '#ffd23f', align: 'center' });
 }
 
 function dim(c, a) { c.globalAlpha = a; R(c, 0, 0, LW, LH, '#160c2c'); c.globalAlpha = 1; }
@@ -2030,7 +2045,8 @@ function drawTitle(c) {
     legendRow(c, 233, [['k', '↓'], ['t', 'Sitzpirouette – Gegner wegdrehen'], ['k', 'P'], ['t', 'Pause'], ['k', 'M'], ['t', 'Ton'], ['k', 'H'], ['t', 'Bestenliste']]);
     legendRow(c, 246, [['k', '↓'], ['k', 'Leertaste'], ['t', 'Waage – doppelte Punkte · nochmal Leertaste: Sprung']]);
   }
-  drawText(c, 'Gamepad: Steuerkreuz · A Sprung/Axel/Waage · B Pirouette · Start Pause', cx, 260, { col: '#c9b6f0', align: 'center' });
+  if (soundLocked() && !G.curtain) drawText(c, SOUND_HINT, cx, 260, { col: '#ffd23f', align: 'center' });
+  else drawText(c, 'Gamepad: Steuerkreuz · A Sprung/Axel/Waage · B Pirouette · Start Pause', cx, 260, { col: '#c9b6f0', align: 'center' });
   if (G.best > 0) drawText(c, `Bestleistung ${G.best}`, LW - 6, 4, { col: '#ffe9b0', align: 'right' });
 }
 
@@ -2084,6 +2100,7 @@ function drawSelect(c) {
     if (on && blinkOn()) { drawText(c, '→', x0 - 12, y0 + h / 2 - 4, { col: '#ffd23f' }); drawText(c, '←', x0 + w + 6, y0 + h / 2 - 4, { col: '#ffd23f' }); }
   });
   drawText(c, isTouch ? 'Figur antippen' : '← → wählen · Enter oder Leertaste: los geht\'s', LW / 2, 246, { col: '#ffe9b0', align: 'center' });
+  if (soundLocked()) drawText(c, SOUND_HINT, LW / 2, 258, { col: '#ffd23f', align: 'center' });
 }
 
 function drawWin(c) {
@@ -2319,7 +2336,7 @@ function pollGamepads() {
   if (!any) { if (pad.any) clearSource(2); pad.any = false; return; }
   if (!pad.any) { G.toast = 'Gamepad verbunden'; G.toastT = 3; }
   pad.any = true;
-  if (l || r || j || s || start) audioInit();
+  if (l || r || j || s || start) audioInit(false);
   setKey(2, 'left', l); setKey(2, 'right', r); setKey(2, 'jump', j); setKey(2, 'spin', s);
   if (start && !pad.start) { if (G.state === 'play' || G.state === 'pause') togglePause(); else confirm(); }
   if (select && !pad.select) restartLevel();
