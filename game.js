@@ -1105,12 +1105,21 @@ defMat('neck', '#9be6bf', '#5fc795', '#3a8f69');
 const C_INK = M.ink + 1, C_WHITE = M.white;
 const LX = -0.45, LY = -0.62, LZ = 0.64;                 // Licht von links oben vorn
 
+// Jede Figur bekommt in einem Bild ihre eigene kleine Zeichenfläche (aus einem Vorrat, der je Bild von vorn beginnt).
+// Eine gemeinsame Fläche mehrmals im selben Bild zu überschreiben, verträgt Safari auf dem iPhone nicht: Dort landeten
+// Figuren mit dem Aussehen einer anderen im Bild und flackerten.
+const RASTER_POOL = 40;
+function rasterSlot(size) {
+  const cv = makeCanvas(size, size);
+  return { cv, c: cv.getContext('2d', { willReadFrequently: true }) || cv.getContext('2d') };   // wird nur per putImageData gefüllt
+}
 function makeRaster(size, ox, oy, s = 1) {              // s: Feinheit – 2 heißt doppelt so viele Pixel je Richtung
-  const cv = makeCanvas(size, size), c = cv.getContext('2d');
-  return { size, ox, oy, s, edge: new Uint8Array(size * size), cv, c, img: c.createImageData(size, size), col: new Uint8Array(size * size), z: new Float32Array(size * size), id: new Uint8Array(size * size), cy: 1, sy: 0, cr: 1, sr: 0, roll: false, pivot: 0 };
+  const first = rasterSlot(size);
+  return { size, ox, oy, s, edge: new Uint8Array(size * size), pool: [first], n: 0, img: first.c.createImageData(size, size), col: new Uint8Array(size * size), z: new Float32Array(size * size), id: new Uint8Array(size * size), cy: 1, sy: 0, cr: 1, sr: 0, roll: false, pivot: 0 };
 }
 let RS = null;
 function rasters() { return RS || (RS = { skater: makeRaster(SKATER_PX, 24 * HD, 40 * HD, HD), enemy: makeRaster(36, 18, 28) }); }
+function rastersNewFrame() { if (RS) for (const k of Object.keys(RS)) RS[k].n = 0; }
 
 function rsBegin(rs, yaw, roll, pivot) {
   rs.col.fill(0); rs.z.fill(-1e9);
@@ -1184,8 +1193,9 @@ function rsFinish(rs, flash) {
     const c = col[i], p = c ? (flash ? WHITE_RGB : PAL[c]) : edge[i] ? INK_RGB : null;
     if (p) { d[o] = p[0]; d[o + 1] = p[1]; d[o + 2] = p[2]; d[o + 3] = 255; } else d[o + 3] = 0;
   }
-  rs.c.putImageData(rs.img, 0, 0);
-  return rs.cv;
+  const i = rs.n++ % RASTER_POOL, slot = rs.pool[i] || (rs.pool[i] = rasterSlot(S));
+  slot.c.putImageData(rs.img, 0, 0);
+  return slot.cv;
 }
 
 const vadd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -1476,6 +1486,8 @@ function renderEnemy(e) {
 function drawEnemy(c, e, cam) {
   const px = wpx(e.x + e.w / 2) - cam, py = wpx(e.y + e.h);
   if (px < -30 || px > LW + 30) return;
+  const sy = py - Math.floor(G.camY / PXS);              // im hohen Level auch nach oben und unten aussortieren
+  if (sy < -30 || sy > LH + 50) return;
   const cv = renderEnemy(e);
   if (e.state === 'squash') {
     if (e.st > 0.3 && Math.floor(e.st * 30) % 2) return;
@@ -2145,6 +2157,7 @@ function drawScene(c) {
 }
 
 function render(c) {
+  rastersNewFrame();
   c.imageSmoothingEnabled = false;
   drawScene(c);
   switch (G.state) {
