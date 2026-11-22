@@ -146,7 +146,8 @@ function handleScores(req, res) {
 
 const server = http.createServer((req, res) => {
   let pathname;
-  try { pathname = new URL(req.url, 'http://localhost').pathname; } catch (e) { res.writeHead(400); res.end(); return; }
+  // Vorgeschaltete Server (z. B. Caddy) schicken Sonderzeichen wie die Klammern im Namen der Titelmelodie als %28/%29 – deshalb entschlüsseln
+  try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch (e) { res.writeHead(400); res.end(); return; }
   if (pathname === '/api/scores') { handleScores(req, res); return; }
   const name = FILES[pathname];
   if (!name) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Nicht gefunden'); return; }
