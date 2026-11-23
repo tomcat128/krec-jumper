@@ -89,11 +89,23 @@ function loadScores() {
   }
 }
 function saveScores() {                                   // erst daneben schreiben, dann austauschen – nie eine halbe Datei
+  const data = JSON.stringify(scores, null, 1), tmp = `${FILE}.tmp`;
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(`${FILE}.tmp`, JSON.stringify(scores, null, 1));
-  fs.renameSync(`${FILE}.tmp`, FILE);
+  try {
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, FILE);
+  } catch (e) {
+    // Ist scores.json als einzelne Datei eingehängt, lässt sie sich nicht austauschen (EBUSY) und daneben oft nichts
+    // anlegen (EACCES) – dann direkt hineinschreiben. Schlägt auch das fehl, gilt der ursprüngliche Fehler.
+    try { fs.writeFileSync(FILE, data); } catch (e2) { throw e; }
+    try { fs.unlinkSync(tmp); } catch (e3) { /* gab es nicht */ }
+  }
 }
 let scores = loadScores();
+// Gleich beim Start prüfen, ob sich die Bestenliste speichern lässt – sonst fällt es erst beim ersten Eintrag auf
+try { saveScores(); } catch (e) {
+  console.error(`ACHTUNG: Die Bestenliste lässt sich nicht speichern (${e.message}). Gehört ${DATA_DIR} dem Benutzer, unter dem der Server läuft?`);
+}
 
 function addScore(name, score) {
   const entry = { name, score, at: new Date().toISOString() };
