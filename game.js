@@ -2403,11 +2403,14 @@ function boot() {
     else if (e.code === 'KeyF') toggleFullscreen();
   });
   window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) setKey(0, k, false); });
-  window.addEventListener('blur', () => {
+  const letGo = () => {                                  // alles loslassen und anhalten
+    fingers.clear();
     clearSource(0); clearSource(1);
     document.querySelectorAll('#touch .on').forEach(b => b.classList.remove('on'));
     if (G.state === 'play') setState('pause');
-  });
+  };
+  window.addEventListener('blur', letGo);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });   // iOS meldet den App-Wechsel nicht immer als blur
   window.addEventListener('gamepaddisconnected', () => { G.toast = 'Gamepad getrennt'; G.toastT = 3; });
 
   const heroUnder = e => { const r = canvas.getBoundingClientRect(); return heroAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
@@ -2442,6 +2445,37 @@ function boot() {
     padEl.addEventListener('pointercancel', up);
     padEl.addEventListener('contextmenu', e => e.preventDefault());
   });
+  // Sicherheitsnetz: Verschluckt das System ein pointerup (z. B. weil Safari die Berührung für eine Zoom-Geste
+  // übernimmt), bliebe der Knopf gedrückt. Deshalb nach jedem abgesetzten Finger mit den Fingern abgleichen,
+  // die laut Browser noch auf dem Bildschirm liegen.
+  const syncTouches = e => {
+    const still = new Set();
+    for (const t of e.touches) { const b = touchBtn(t); if (b) still.add(b); }
+    let changed = false;
+    for (const [id, b] of fingers) if (!b || !still.has(b)) { if (b || !e.touches.length) { fingers.delete(id); changed = true; } }
+    if (changed || (!fingers.size && Object.values(held).some(v => v & 2))) refreshTouch();
+  };
+  document.addEventListener('touchend', syncTouches);
+  document.addEventListener('touchcancel', syncTouches);
+
+  // Safari auf dem iPhone zoomt trotz user-scalable=no und touch-action: none manchmal hinein (Doppeltippen,
+  // zwei Daumen gleichzeitig). Das Spiel braucht keine Standardgesten – außer in der Bestenliste (Scrollen, Namensfeld).
+  const ownTouch = e => !(e.target && e.target.closest && e.target.closest('#hs'));
+  for (const ev of ['touchstart', 'touchmove']) document.addEventListener(ev, e => { if (e.cancelable && ownTouch(e)) e.preventDefault(); }, { passive: false });
+  for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(ev, e => { if (ownTouch(e)) e.preventDefault(); }, { passive: false });
+  // Ist das Bild trotzdem vergrößert, die Vergrößerung zurücksetzen: Ein kurz gesetztes maximum-scale=1 zwingt
+  // Safari zurück auf Maßstab 1.
+  const vv = window.visualViewport, vpMeta = document.querySelector('meta[name="viewport"]');
+  if (vv && vpMeta) {
+    const vpBase = vpMeta.content;
+    let unzoomT = 0;
+    vv.addEventListener('resize', () => {
+      if (!isTouch || vv.scale <= 1.01 || unzoomT) return;
+      letGo();
+      vpMeta.content = vpBase + ', maximum-scale=1';
+      unzoomT = setTimeout(() => { vpMeta.content = vpBase; unzoomT = 0; resize(); }, 400);
+    });
+  }
   const pauseBtn = document.getElementById('pauseBtn');
   if (pauseBtn) pauseBtn.addEventListener('pointerdown', e => { e.preventDefault(); if (G.state === 'play' || G.state === 'pause') togglePause(); else confirm(); });
   hsInit();
