@@ -2297,15 +2297,24 @@ let isTouch = false;
 const embedded = (() => { try { return typeof window !== 'undefined' && window.self !== window.top; } catch (e) { return true; } })();   // läuft in einem <iframe>
 const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const canFullscreen = typeof document !== 'undefined' && (document.fullscreenEnabled !== undefined ? document.fullscreenEnabled : !!document.webkitFullscreenEnabled);
+// Eingebettet ohne Vollbild (Safari auf dem iPhone kennt für Seiten kein Vollbild, fremde <iframe> erlauben es oft
+// nicht): das Spiel in einem eigenen Tab öffnen. Das muss direkt in der Antippen-Aktion geschehen, sonst blockt Safari.
+function openOwnTab() {
+  const w = window.open(window.location.href, '_blank');
+  if (w) { try { w.opener = null; } catch (e) { /* egal */ } }
+  else { G.toast = 'Vollbild geht hier nicht – Spiel im eigenen Tab öffnen'; G.toastT = 4; }
+}
 function toggleFullscreen() {
   const root = document.documentElement;
   if (fsElement()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
-  if (!canFullscreen) { if (embedded) window.open(window.location.href, '_blank', 'noopener'); return; }
+  const request = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (!canFullscreen || !request) { if (embedded) openOwnTab(); return; }
   const lock = () => { const o = window.screen.orientation; if (o && o.lock) o.lock('landscape').catch(() => {}); };
+  const refused = () => { if (embedded) openOwnTab(); };
   try {
-    const r = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
-    if (r && r.then) r.then(lock, () => {});
-  } catch (e) { /* vom Browser abgelehnt */ }
+    const r = request.call(root);
+    if (r && r.then) r.then(lock, refused);
+  } catch (e) { refused(); }
 }
 function press(k) {
   if (HS.open) return;
@@ -2485,7 +2494,21 @@ function boot() {
   // deren <iframe> es erlaubt (allow="fullscreen"); sonst öffnet der Knopf das Spiel in einem eigenen Tab.
   const fsBtns = ['fsBtn', 'fsCorner'].map(id => document.getElementById(id)).filter(Boolean);
   if (!canFullscreen && !embedded) fsBtns.forEach(b => { b.style.display = 'none'; });
-  fsBtns.forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); toggleFullscreen(); }));
+  // Ausgelöst wird erst beim Loslassen: Für Safari zählt nur touchend/click als Nutzeraktion, die Vollbild oder ein
+  // neues Fenster erlauben darf – pointerdown mit dem Finger nicht. Weil das Spiel touchstart abfängt, kommt auf
+  // Touch-Geräten kein click an; dort übernimmt touchend. Die Zeitsperre verhindert doppeltes Auslösen.
+  let fsLast = -Infinity;
+  const fsTap = e => {
+    e.preventDefault(); e.stopPropagation();
+    if (Math.abs(e.timeStamp - fsLast) < 600) return;
+    fsLast = e.timeStamp;
+    toggleFullscreen();
+  };
+  fsBtns.forEach(b => {
+    b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); });
+    b.addEventListener('touchend', fsTap, { passive: false });
+    b.addEventListener('click', fsTap);
+  });
   for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { document.body.classList.toggle('fs', !!fsElement()); resize(); });
 
   loadBest();
