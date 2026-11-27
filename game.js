@@ -2688,7 +2688,7 @@ function boot() {
 
   // Safari auf dem iPhone zoomt trotz user-scalable=no und touch-action: none manchmal hinein (Doppeltippen,
   // zwei Daumen gleichzeitig). Das Spiel braucht keine Standardgesten – außer in der Bestenliste (Scrollen, Namensfeld).
-  const ownTouch = e => !(e.target && e.target.closest && e.target.closest('#hs'));
+  const ownTouch = e => !(e.target && e.target.closest && e.target.closest('.hs'));   // Bestenliste und Figuren-Editor bedienen sich mit normalen Tipps
   for (const ev of ['touchstart', 'touchmove']) document.addEventListener(ev, e => { if (e.cancelable && ownTouch(e)) e.preventDefault(); }, { passive: false });
   for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(ev, e => { if (ownTouch(e)) e.preventDefault(); }, { passive: false });
   // Ist das Bild trotzdem vergrößert, die Vergrößerung zurücksetzen: Ein kurz gesetztes maximum-scale=1 zwingt
