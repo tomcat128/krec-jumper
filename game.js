@@ -404,7 +404,8 @@ const G = {
   levelIdx: 0, lvl: null, p: null, enemies: [], particles: [], popups: [],
   cam: 0, shake: 0, wipe: 0, toast: '', toastT: 0, hearts: MAX_HEARTS, score: 0, scoreAtStart: 0, best: 0,
   time: 0, starsGot: 0, checkpoint: null, marks: [], bonus: 0, sparkT: 0, menu: 0, hsAsked: false, fin: null, stale: null, lockT: 0, zoom: 1, zoomDx: 0, zoomY: 0, curtain: false, camY: 0,
-  hero: 0,                                               // gewählte Figur: 0 Läuferin, 1 Läufer
+  hero: 0,                                               // gewählte Figur: 0 Läuferin, 1 Läufer, 2 selbst gestaltet
+  custom: null,                                          // Aussehen der eigenen Figur – null, solange noch keine gestaltet wurde
 };
 
 function makePlayer(x, y) {
@@ -453,17 +454,49 @@ function showTitle() {
 }
 
 // Figurenwahl vor dem Start – die letzte Wahl wird gemerkt
-const HEROES = ['Läuferin', 'Läufer'];
+const HEROES = ['Läuferin', 'Läufer', 'Eigene'];
+const CUSTOM = 2, HERO_GAP = 136;
 const SOUND_HINT = 'Kein Ton? Einmal klicken oder eine Taste drücken.';   // z. B. wenn nur mit dem Gamepad gespielt wird
-function loadHero() { try { G.hero = localStorage.getItem('krec-jumper-figur') === '1' ? 1 : 0; } catch (e) { G.hero = 0; } }
+function loadHero() {
+  try {
+    G.hero = clamp(+localStorage.getItem('krec-jumper-figur') || 0, 0, HEROES.length - 1);
+    G.custom = cleanLook(JSON.parse(localStorage.getItem('krec-jumper-eigene') || 'null'));
+  } catch (e) { G.hero = 0; G.custom = null; }
+  if (G.custom) applyLook(G.custom);
+}
+function saveHero() { try { localStorage.setItem('krec-jumper-figur', String(G.hero)); } catch (e) { /* egal */ } }
 function pickHero(i) {
   i = clamp(i, 0, HEROES.length - 1);
   if (i === G.hero) return;
   G.hero = i; sfx('star');
-  try { localStorage.setItem('krec-jumper-figur', String(i)); } catch (e) { /* egal */ }
+  saveHero();
 }
-const heroX = i => LW / 2 + (i ? 1 : -1) * 78;             // Bildmitte der beiden Figuren in der Auswahl
-const heroAt = (x, y) => (y > 46 && y < 226 && Math.abs(x - LW / 2) < 150 ? (x < LW / 2 ? 0 : 1) : -1);
+const heroX = i => LW / 2 + (i - 1) * HERO_GAP;            // Bildmitte der drei Figuren in der Auswahl
+const heroAt = (x, y) => (y > 46 && y < 226 && Math.abs(x - LW / 2) < HERO_GAP * 1.5 ? clamp(Math.floor((x - LW / 2) / HERO_GAP + 1.5), 0, 2) : -1);
+// Der kleine Knopf „Ändern" oben im Rahmen der eigenen Figur
+const editAt = (x, y) => !!G.custom && y > 52 && y < 80 && Math.abs(x - heroX(CUSTOM)) < 64;
+
+// ── Die eigene Figur: Auswahlmöglichkeiten des Editors ──
+const LOOK_OPTS = [
+  { key: 'g', label: 'Geschlecht', names: ['Mädchen', 'Junge'] },
+  { key: 'style', label: 'Frisur', names: ['Zopf', 'Kurz', 'Dutt', 'Lang', 'Zöpfe', 'Locken'] },
+  { key: 'skin', label: 'Hautfarbe', colors: ['#fde0c4', '#f6bb92', '#e2a878', '#c68652', '#9a5f38', '#6b3f26'] },
+  { key: 'hair', label: 'Haarfarbe', colors: ['#6f3520', '#3a2418', '#1c1a22', '#e8c860', '#d2552a', '#b9bcc8', '#ff5fa8', '#3aa0e0'] },
+  { key: 'suit', label: 'Kleidung', names: ['Kleid', 'Anzug'] },
+  { key: 'dress', label: 'Farbe Kleid / Weste', colors: ['#ff3f86', '#e23b3b', '#ff8a1a', '#f2c01e', '#35b558', '#19c7b5', '#3a7be0', '#7446d8', '#2e2a48', '#eef0fa'] },
+  { key: 'boot', label: 'Rollschuhe', colors: ['#e4e8f6', '#34304e', '#ff3f86', '#19c7b5', '#ffd23f', '#7446d8', '#e23b3b'] },
+];
+const LOOK_DEFAULT = { g: 0, style: 3, skin: 1, hair: 3, suit: 0, dress: 0, boot: 3 };
+// Prüft gespeicherte Angaben – alles Unbekannte fällt auf den Vorschlag zurück
+function cleanLook(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = {};
+  for (const opt of LOOK_OPTS) {
+    const n = (opt.names || opt.colors).length, v = raw[opt.key];
+    o[opt.key] = Number.isInteger(v) && v >= 0 && v < n ? v : LOOK_DEFAULT[opt.key];
+  }
+  return o;
+}
 
 function loadBest() { try { G.best = +localStorage.getItem('krec-jumper-best') || 0; } catch (e) { G.best = 0; } }
 function saveBest() {
@@ -910,7 +943,11 @@ function confirm() {
   if (HS.open) return;
   switch (G.state) {
     case 'title': if (G.stateT > TITLE_HOLD) setState('select'); break;
-    case 'select': if (G.stateT > TITLE_HOLD) { G.score = 0; G.hsAsked = false; startLevel(0); } break;
+    case 'select':
+      if (G.stateT <= TITLE_HOLD) break;
+      if (G.hero === CUSTOM && !G.custom) edOpen();        // hinter dem Fragezeichen wartet der Editor
+      else { G.score = 0; G.hsAsked = false; startLevel(0); }
+      break;
     case 'pause': MENU[G.menu][1](); break;
     case 'over': if (G.stateT > 0.9) { G.score = G.scoreAtStart; startLevel(G.levelIdx); } break;
     case 'finale': if (G.stateT > 0.6) skipFinale(); break;
@@ -1091,6 +1128,12 @@ defMat('pants', '#5a5478', '#2e2a48', '#17142a');
 defMat('shirt', '#ffffff', '#eef0fa', '#b4bad6');
 defMat('bootM', '#6a6488', '#34304e', '#1a172c');
 defMat('hairM', '#6a4a34', '#3a2418', '#1e110b');
+// die eigene Figur: Diese Farben setzt der Editor (applyLook)
+defMat('cSkin', '#ffe3c8', '#f6bb92', '#cf8562');
+defMat('cTights', '#fbd3b4', '#eba57e', '#bd7355');
+defMat('cHair', '#a85a30', '#6f3520', '#431d13');
+defMat('cBoot', '#ffffff', '#e4e8f6', '#a4abca');
+defMat('cDress', '#ff8fb8', '#ff3f86', '#b5175a');
 defMat('ink', INK, INK, INK);
 defMat('white', '#ffffff', '#ffffff', '#d8dcec');
 defMat('cone', '#ffb066', '#ff7a1a', '#c44a08');
@@ -1103,6 +1146,25 @@ defMat('birdDark', '#8794ab', '#5d6a80', '#3f4a5e');
 defMat('beak', '#ffc35a', '#ff9f1a', '#c26a08');
 defMat('neck', '#9be6bf', '#5fc795', '#3a8f69');
 const C_INK = M.ink + 1, C_WHITE = M.white;
+// Aussehen je Figur: Körperbau, Kleidung, Frisur (Reihenfolge wie im Editor) und Farben
+const LOOKS = [
+  { man: false, suit: false, style: 0, skin: M.skin, tights: M.tights, boot: M.boot, hair: M.hair, dress: M.dress },
+  { man: true, suit: true, style: 1, skin: M.skin, tights: M.tights, boot: M.bootM, hair: M.hairM, dress: M.dress },
+  { man: false, suit: false, style: 3, skin: M.cSkin, tights: M.cTights, boot: M.cBoot, hair: M.cHair, dress: M.cDress },
+];
+// Helle und dunkle Stufe zu einer Grundfarbe: k > 0 mischt Weiß bei, k < 0 Schwarz
+function shadeOf(hex, k) { const t = k > 0 ? 255 : 0, a = Math.abs(k); return hexRgb(hex).map(v => Math.round(v + (t - v) * a)); }
+function setMat(name, hex, hi = 0.45, sh = -0.3) { const i = M[name]; PAL[i] = shadeOf(hex, hi); PAL[i + 1] = hexRgb(hex); PAL[i + 2] = shadeOf(hex, sh); }
+function applyLook(cfg) {
+  const L = LOOKS[CUSTOM], col = key => LOOK_OPTS.find(o => o.key === key).colors[cfg[key]];
+  L.man = cfg.g === 1; L.suit = cfg.suit === 1; L.style = cfg.style;
+  setMat('cSkin', col('skin'));
+  const leg = shadeOf(col('skin'), -0.07);                  // Strumpfhose: einen Hauch dunkler als die Haut
+  setMat('cTights', '#' + leg.map(v => v.toString(16).padStart(2, '0')).join(''), 0.3);
+  setMat('cHair', col('hair'), 0.3, -0.4);
+  setMat('cBoot', col('boot'), cfg.boot === 0 ? 1 : 0.35);
+  setMat('cDress', col('dress'), col('dress') === '#eef0fa' ? 1 : 0.42);
+}
 const LX = -0.45, LY = -0.62, LZ = 0.64;                 // Licht von links oben vorn
 
 // Jede Figur bekommt in einem Bild ihre eigene kleine Zeichenfläche (aus einem Vorrat, der je Bild von vorn beginnt).
@@ -1303,12 +1365,12 @@ function mixPose(a, b, k) {
 const smooth = k => { k = clamp(k, 0, 1); return k * k * (3 - 2 * k); };
 
 // Rendert die Läuferin in ihr Sprite. yaw: 0 = schaut nach rechts, -90° = zur Kamera, 180° = links.
-// who: 0 = Läuferin im Kleid, 1 = Läufer in Hose, Hemd und Weste. Ohne Angabe die gewählte Figur.
+// who: 0 = Läuferin im Kleid, 1 = Läufer in Hose, Hemd und Weste, 2 = die selbst gestaltete Figur. Ohne Angabe die gewählte.
 function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
-  const rs = rasters().skater, man = who === 1;
+  const rs = rasters().skater, L = LOOKS[who] || LOOKS[0], man = L.man, suit = L.suit;
   rsBegin(rs, yaw, roll, 14);
   const hip = P.hip, chest = P.chest, H = vadd(chest, P.head), F = P.flare;
-  const legMat = man ? M.pants : M.tights, bootMat = man ? M.bootM : M.boot, hairMat = man ? M.hairM : M.hair;
+  const legMat = suit ? M.pants : L.tights, bootMat = L.boot, hairMat = L.hair, skin = L.skin, dress = L.dress;
   for (const side of [-1, 1]) {
     const foot = side > 0 ? P.fa : P.fb, dir = vnorm(side > 0 ? P.da : P.db), id = side > 0 ? 2 : 1;
     const hp = [hip[0], hip[1], side * 1.3];
@@ -1319,43 +1381,73 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
     rsCap(rs, vmad(vmad(foot, dir, -0.5), n, -0.2), vmad(vmad(foot, dir, 1.9), n, -0.7), 1.5, 1.35, bootMat, id);
     rsSph(rs, vmad(foot, n, 1.0), 1.4, bootMat, id);
     for (const w of [-0.9, 1.9]) for (const zz of [-0.8, 0.8]) rsSph(rs, vadd(vmad(vmad(foot, dir, w), n, -2.25), [0, 0, zz]), 1.05, M.wheel, id);
-    rsSph(rs, vmad(vmad(foot, dir, 3.1), n, -1.5), 0.8, M.dress, id);
+    rsSph(rs, vmad(vmad(foot, dir, 3.1), n, -1.5), 0.8, dress, id);
   }
   const waist = vmad(hip, [chest[0] - hip[0], chest[1] - hip[1], 0], 0.42);
-  if (man) {
+  if (suit) {
     // Hose bis zur Taille, darüber die Weste mit Goldgürtel; am Hals schaut der Hemdkragen heraus
-    rsSph(rs, [hip[0], hip[1] + 0.3, 0], 2.75, M.pants, 3, 0.95);
-    rsCap(rs, [hip[0], hip[1] + 1.4, 0], chest, 2.55, 3.0, M.dress, 3);
-    rsSph(rs, waist, 2.8, M.gold, 3, 0.4);
+    rsSph(rs, [hip[0], hip[1] + 0.3, 0], man ? 2.75 : 2.6, M.pants, 3, 0.95);
+    rsCap(rs, [hip[0], hip[1] + 1.4, 0], chest, man ? 2.55 : 2.4, man ? 3.0 : 2.75, dress, 3);
+    rsSph(rs, waist, man ? 2.8 : 2.65, M.gold, 3, 0.4);
     rsSph(rs, vadd(chest, [0.5, 1.9, 0]), 1.7, M.shirt, 3, 0.8);
   } else {
     // Rumpf, Röckchen (fliegt bei Drehungen nach außen), Gürtel
-    rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, M.dress, 3);
-    rsSph(rs, [hip[0] - lag, hip[1] - 0.9 + F * 0.5, 0], 4.3 + F * 1.9, M.dress, 3, 1.0);
-    rsSph(rs, [hip[0] - lag * 0.5, hip[1] + 0.2, 0], 3.7 + F * 1.0, M.dress, 3, 1.1);
-    rsSph(rs, [hip[0], hip[1] + 1.3, 0], 3.1 + F * 0.3, M.dress, 3, 1.2);
+    rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, dress, 3);
+    rsSph(rs, [hip[0] - lag, hip[1] - 0.9 + F * 0.5, 0], 4.3 + F * 1.9, dress, 3, 1.0);
+    rsSph(rs, [hip[0] - lag * 0.5, hip[1] + 0.2, 0], 3.7 + F * 1.0, dress, 3, 1.1);
+    rsSph(rs, [hip[0], hip[1] + 1.3, 0], 3.1 + F * 0.3, dress, 3, 1.2);
     rsSph(rs, waist, 2.85, M.gold, 3, 0.55);
   }
   for (const side of [-1, 1]) {
     const hand = side > 0 ? P.ha : P.hb, id = side > 0 ? 5 : 4;
     const shd = [chest[0], chest[1] + 0.5, side * (man ? 2.9 : 2.6)];
     const el = ik3(shd, hand, 4, 4, [-0.7, -0.6, side * 0.9]);
-    rsSph(rs, shd, man ? 1.6 : 1.45, man ? M.shirt : M.dress, 3);
-    rsCap(rs, shd, el, man ? 1.25 : 1.1, man ? 1.15 : 1.0, man ? M.shirt : M.skin, id);   // er trägt lange Hemdärmel
-    rsCap(rs, el, hand, man ? 1.15 : 1.0, man ? 1.05 : 0.95, man ? M.shirt : M.skin, id);
-    rsSph(rs, hand, 1.2, M.skin, id);
+    rsSph(rs, shd, man ? 1.6 : 1.45, suit ? M.shirt : dress, 3);
+    rsCap(rs, shd, el, man ? 1.25 : 1.1, man ? 1.15 : 1.0, suit ? M.shirt : skin, id);   // zum Anzug gehören lange Hemdärmel
+    rsCap(rs, el, hand, man ? 1.15 : 1.0, man ? 1.05 : 0.95, suit ? M.shirt : skin, id);
+    rsSph(rs, hand, 1.2, skin, id);
   }
-  // Kopf – sie mit Pferdeschwanz, er mit kurzem Haar
-  rsSph(rs, vadd(chest, [0.2, 2.5, 0]), 1.2, M.skin, 6);
-  rsSph(rs, vadd(H, [0.5, 0, 0]), 3.15, M.skin, 6);
+  // Kopf und Frisur – Zopf, lange Haare und Zöpfe wehen mit (tail)
+  rsSph(rs, vadd(chest, [0.2, 2.5, 0]), 1.2, skin, 6);
+  rsSph(rs, vadd(H, [0.5, 0, 0]), 3.15, skin, 6);
   rsSph(rs, vadd(H, [-0.55, 0.45, 0]), 3.5, hairMat, 7);
   rsSph(rs, vadd(H, [1.6, 2.3, 0]), 1.8, hairMat, 7);
-  if (man) rsSph(rs, vadd(H, [0.6, 3.0, 0]), 1.9, hairMat, 7);
-  else {
-    const B = vadd(H, [-2.7, 2.6, 0]), td = vnorm(tail);
-    rsSph(rs, B, 1.2, M.gold, 8);
-    rsCap(rs, vmad(B, td, 1.3), vmad(B, td, 3.4), 1.55, 1.35, M.hair, 7);
-    rsCap(rs, vmad(B, td, 3.4), vadd(vmad(B, td, 5.4), [0, -0.7, 0]), 1.35, 0.8, M.hair, 7);
+  const td = vnorm(tail);
+  switch (L.style) {
+    case 1: rsSph(rs, vadd(H, [0.6, 3.0, 0]), 1.9, hairMat, 7); break;                       // kurz
+    case 2:                                                                                // Dutt mit Haarband
+      rsSph(rs, vadd(H, [-1.3, 3.3, 0]), 1.3, M.gold, 8);
+      rsSph(rs, vadd(H, [-1.7, 4.5, 0]), 2.0, hairMat, 7);
+      break;
+    case 3: {                                                                              // lang und offen
+      const B = vadd(H, [-2.3, 0.6, 0]), sway = [td[0] * 0.5 - 0.1, -1, 0];
+      rsCap(rs, B, vmad(B, sway, 3.2), 2.7, 2.4, hairMat, 7);
+      rsCap(rs, vmad(B, sway, 3.2), vadd(vmad(B, td, 2.2), [0, -4.2, 0]), 2.4, 1.6, hairMat, 7);
+      break;
+    }
+    case 4:                                                                                // zwei Zöpfe
+      for (const s of [-1, 1]) {
+        const B = vadd(H, [-1.0, -0.4, s * 3.1]);
+        rsSph(rs, B, 1.0, M.gold, 8);
+        rsCap(rs, vmad(B, td, 0.9), vmad(B, td, 2.8), 1.3, 1.15, hairMat, 7);
+        rsCap(rs, vmad(B, td, 2.8), vadd(vmad(B, td, 4.4), [0, -0.5, 0]), 1.15, 0.7, hairMat, 7);
+      }
+      break;
+    case 5:                                                                                // Locken
+      rsSph(rs, vadd(H, [-0.9, 1.0, 0]), 4.1, hairMat, 7);
+      for (const s of [-1, 1]) {
+        rsSph(rs, vadd(H, [0.9, 3.0, s * 1.7]), 2.0, hairMat, 7);
+        rsSph(rs, vadd(H, [-1.6, 3.4, s * 2.0]), 2.1, hairMat, 7);
+        rsSph(rs, vadd(H, [-2.6, -1.4, s * 2.3]), 2.2, hairMat, 7);
+        rsSph(rs, vadd(H, [-0.4, -0.6, s * 3.3]), 1.6, hairMat, 7);
+      }
+      break;
+    default: {                                                                             // Pferdeschwanz
+      const B = vadd(H, [-2.7, 2.6, 0]);
+      rsSph(rs, B, 1.2, M.gold, 8);
+      rsCap(rs, vmad(B, td, 1.3), vmad(B, td, 3.4), 1.55, 1.35, hairMat, 7);
+      rsCap(rs, vmad(B, td, 3.4), vadd(vmad(B, td, 5.4), [0, -0.7, 0]), 1.35, 0.8, hairMat, 7);
+    }
   }
   for (const s of [-1, 1]) rsDecal(rs, vadd(H, [3.2, 0.9, s * 1.9]), [[0, 0, C_INK], [0, 1, C_INK]], 6);
   return rsFinish(rs, flash);
@@ -2091,7 +2183,8 @@ function drawClear(c) {
   }
 }
 
-// Figurenwahl: beide stehen nebeneinander, die gewählte rollt und winkt im Rahmen, die andere wartet
+// Figurenwahl: alle stehen nebeneinander, die gewählte rollt und winkt im Rahmen, die anderen warten.
+// Die dritte ist die eigene Figur – solange sie noch nicht gestaltet wurde, steht dort ein Fragezeichen.
 function drawSelect(c) {
   dim(c, 0.62);
   const t = G.t;
@@ -2106,12 +2199,20 @@ function drawSelect(c) {
     const o = { t, stride: t * 8, lean: 0.5 };
     const wave = on ? smooth(Math.sin(t * 1.6) * 1.6 - 0.2) : 0;                 // ab und zu die Arme hoch
     const P = on ? mixPose(skaterPose('skate', o), skaterPose('win', o), wave) : skaterPose('idle', o);
-    c.drawImage(renderSkater(P, on ? -0.75 : -0.9, 0, false, [-0.7, -0.8, 0], on ? 0.5 : 0, i), 0, 0, SKATER_PX, SKATER_PX, x - 72, y0 + h - 30 - 120, 144, 144);
+    const open = i === CUSTOM && !G.custom;                                      // noch keine eigene Figur
+    if (open) drawText(c, '?', x, y0 + 28 + (on ? Math.round(Math.sin(t * 3) * 3) : 0), { scale: 9, align: 'center', grad: on ? GOLD : null, col: '#c9b6f0' });
+    else c.drawImage(renderSkater(P, on ? -0.75 : -0.9, 0, false, [-0.7, -0.8, 0], on ? 0.5 : 0, i), 0, 0, SKATER_PX, SKATER_PX, x - 72, y0 + h - 30 - 120, 144, 144);
     c.globalAlpha = 1;
-    drawText(c, name, x, y0 + h + 6, { scale: 2, align: 'center', col: on ? '#ffd23f' : '#c9b6f0' });
+    if (i === CUSTOM && G.custom) {                                              // Knopf zum Umgestalten
+      R(c, x - 27, y0 + 6, 54, 14, INK); R(c, x - 26, y0 + 7, 52, 12, on ? '#ff3f86' : '#6a5a8c');
+      drawText(c, 'Ändern', x, y0 + 9, { align: 'center' });
+    }
+    drawText(c, open ? 'Neu' : name, x, y0 + h + 6, { scale: 2, align: 'center', col: on ? '#ffd23f' : '#c9b6f0' });
     if (on && blinkOn()) { drawText(c, '→', x0 - 12, y0 + h / 2 - 4, { col: '#ffd23f' }); drawText(c, '←', x0 + w + 6, y0 + h / 2 - 4, { col: '#ffd23f' }); }
   });
-  drawText(c, isTouch ? 'Figur antippen' : '← → wählen · Enter oder Leertaste: los geht\'s', LW / 2, 246, { col: '#ffe9b0', align: 'center' });
+  const newOne = G.hero === CUSTOM && !G.custom;
+  drawText(c, isTouch ? 'Figur antippen' : `← → wählen · Enter oder Leertaste: ${newOne ? 'Figur gestalten' : 'los geht\'s'}${G.custom ? ' · E: ändern' : ''}`, LW / 2, 246, { col: '#ffe9b0', align: 'center' });
+  if (ED.open) edPreview();
   if (soundLocked()) drawText(c, SOUND_HINT, LW / 2, 258, { col: '#ffd23f', align: 'center' });
 }
 
@@ -2277,6 +2378,101 @@ async function hsSubmit() {
   } catch (e) { hsMsg('Speichern hat nicht geklappt – versuch es noch einmal.'); }
   HS.busy = false;
 }
+// ───────────────────────── Editor für die eigene Figur ─────────────────────────
+// Wie die Bestenliste ein HTML-Fenster über dem Spiel; die Vorschau rendert dieselbe Figur wie im Spiel.
+// Bedienung: antippen/anklicken – oder mit Pfeiltasten bzw. Gamepad: ↑ ↓ wählt den Punkt, ← → ändert ihn.
+// Unter den Punkten liegt die Zeile mit „Fertig" und „Abbrechen" (row = LOOK_OPTS.length, btn = 0/1).
+const ED = { open: false, draft: null, openedAt: 0, row: 0, btn: 0 };
+const edLate = () => performance.now() - ED.openedAt > 350;   // der Tastendruck oder Tipp, der den Editor geöffnet hat, zählt nicht mit
+function edMark() {
+  document.querySelectorAll('#edOpts button').forEach(b => { b.setAttribute('aria-pressed', String(ED.draft[b.dataset.key] === +b.dataset.v)); });
+  const onBtns = ED.row === LOOK_OPTS.length;
+  document.querySelectorAll('#edOpts .ed-row').forEach((r, i) => { r.classList.toggle('cur', i === ED.row); });
+  byId('edOk').classList.toggle('cur', onBtns && ED.btn === 0);
+  byId('edCancel').classList.toggle('cur', onBtns && ED.btn === 1);
+}
+function edSet(key, v) { ED.draft[key] = v; applyLook(ED.draft); edMark(); sfx('card'); }
+// what: up, down, left, right, ok, back
+function edNav(what) {
+  if (!ED.open || !edLate()) return;
+  const n = LOOK_OPTS.length, opt = LOOK_OPTS[ED.row];
+  switch (what) {
+    case 'up': case 'down': ED.row = (ED.row + (what === 'up' ? n : 1)) % (n + 1); sfx('card'); break;
+    case 'left': case 'right': {
+      const d = what === 'left' ? -1 : 1;
+      if (opt) { const m = (opt.names || opt.colors).length; edSet(opt.key, (ED.draft[opt.key] + d + m) % m); }
+      else { ED.btn = 1 - ED.btn; sfx('card'); }
+      break;
+    }
+    case 'ok':                                           // von einem Punkt aus: runter zu „Fertig"; dort: auslösen
+      if (opt) { ED.row = n; ED.btn = 0; sfx('card'); } else { edClose(ED.btn === 0); return; }
+      break;
+    case 'back':                                         // erst zu „Abbrechen" springen, beim zweiten Mal verwerfen
+      if (opt || ED.btn === 0) { ED.row = n; ED.btn = 1; sfx('card'); } else { edClose(false); return; }
+      break;
+    default: return;
+  }
+  edMark();
+  const row = document.querySelectorAll('#edOpts .ed-row')[ED.row];
+  if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+}
+function edOpen() {
+  if (typeof document === 'undefined' || !byId('ed') || HS.open) return;
+  clearSource(0); clearSource(1);
+  document.querySelectorAll('#touch .on').forEach(b => b.classList.remove('on'));
+  ED.draft = { ...(G.custom || LOOK_DEFAULT) }; ED.row = 0; ED.btn = 0;
+  applyLook(ED.draft);
+  HS.open = true; ED.open = true; ED.openedAt = performance.now();   // HS.open sperrt die Spieleingabe
+  byId('ed').hidden = false;
+  edMark();
+  byId('edBox').focus();                                 // kein Knopf: Die noch gedrückte Leertaste würde ihn sonst auslösen
+}
+function edClose(keep) {
+  if (!ED.open) return;
+  if (keep) {
+    G.custom = ED.draft; G.hero = CUSTOM; saveHero(); sfx('star');
+    try { localStorage.setItem('krec-jumper-eigene', JSON.stringify(G.custom)); } catch (e) { /* egal */ }
+  } else if (G.custom) applyLook(G.custom);              // verworfen: zurück zum gespeicherten Aussehen
+  ED.open = false; HS.open = false; G.stateT = 0;        // kurze Sperre, damit derselbe Tastendruck nicht gleich startet
+  byId('ed').hidden = true;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+}
+function edPreview() {
+  const cv = byId('edView'), t = G.t, o = { t, stride: t * 8, lean: 0.5 };
+  const c = cv.getContext('2d');
+  const P = mixPose(skaterPose('skate', o), skaterPose('win', o), smooth(Math.sin(t * 1.6) * 1.6 - 0.2));
+  const yaw = -Math.PI / 2 + Math.sin(t * 0.9) * 1.5;     // dreht sich hin und her, damit man die Frisur von allen Seiten sieht
+  c.clearRect(0, 0, cv.width, cv.height);
+  c.drawImage(renderSkater(P, yaw, 0, false, [-0.5, -0.85, 0], 0.4, CUSTOM), -12, -14);   // Ausschnitt um die Figur
+}
+function edInit() {
+  if (!byId('ed')) return;
+  const box = byId('edOpts');
+  for (const opt of LOOK_OPTS) {
+    const row = document.createElement('div'), lab = document.createElement('span'), set = document.createElement('div');
+    row.className = 'ed-row'; lab.textContent = opt.label; set.className = 'ed-set';
+    set.setAttribute('role', 'group'); set.setAttribute('aria-label', opt.label);
+    (opt.names || opt.colors).forEach((v, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.key = opt.key; b.dataset.v = i;
+      if (opt.names) b.textContent = v;
+      else { b.className = 'sw'; b.style.background = v; b.setAttribute('aria-label', `${opt.label} ${i + 1}`); }
+      set.appendChild(b);
+    });
+    row.append(lab, set); box.appendChild(row);
+  }
+  box.addEventListener('click', e => {
+    const b = e.target.closest ? e.target.closest('button') : null;
+    if (!b || !ED.open || !edLate()) return;
+    audioInit();
+    ED.row = LOOK_OPTS.findIndex(o => o.key === b.dataset.key);
+    edSet(b.dataset.key, +b.dataset.v);
+    b.blur();                                            // sonst würde Enter danach diesen Knopf auslösen statt „Fertig"
+  });
+  byId('edOk').addEventListener('click', () => { if (edLate()) edClose(true); });
+  byId('edCancel').addEventListener('click', () => { if (edLate()) edClose(false); });
+}
+
 function hsInit() {
   if (!byId('hs')) return;
   byId('hsForm').addEventListener('submit', e => { e.preventDefault(); hsSubmit(); });
@@ -2318,7 +2514,7 @@ function toggleFullscreen() {
 }
 function press(k) {
   if (HS.open) return;
-  if (G.state === 'select' && (k === 'left' || k === 'right')) pickHero(k === 'left' ? 0 : 1);
+  if (G.state === 'select' && (k === 'left' || k === 'right')) pickHero(G.hero + (k === 'left' ? -1 : 1));
   if (k === 'jump') {
     if (G.state !== 'play') { confirm(); input.jump = true; return; }
     if (!input.jump) input.jumpPressed = true;
@@ -2340,10 +2536,10 @@ function restartLevel() {
 }
 
 // Gamepad: Steuerkreuz/Stick = rollen, A/Y = Sprung (in der Luft: Axel), B/X/Schultertasten/unten = Pirouette, Start = Pause
-const pad = { start: false, select: false, any: false, up: false, down: false };
+const pad = { start: false, select: false, any: false, up: false, down: false, left: false, right: false, ok: false, back: false };
 function pollGamepads() {
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
-  let l = false, r = false, j = false, s = false, start = false, select = false, any = false, up = false, down = false;
+  let l = false, r = false, j = false, s = false, start = false, select = false, any = false, up = false, down = false, back = false;
   for (const gp of navigator.getGamepads()) {
     if (!gp || !gp.connected) continue;
     const b = i => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
@@ -2353,12 +2549,21 @@ function pollGamepads() {
     l = l || b(14) || ax < -0.4; r = r || b(15) || ax > 0.4;
     j = j || b(0) || b(3);
     s = s || b(1) || b(2) || b(4) || b(5) || b(6) || b(7) || b(13) || ay > 0.65;
-    start = start || b(9); select = select || b(8);
+    start = start || b(9); select = select || b(8); back = back || b(1) || b(2);
   }
   if (!any) { if (pad.any) clearSource(2); pad.any = false; return; }
   if (!pad.any) { G.toast = 'Gamepad verbunden'; G.toastT = 3; }
   pad.any = true;
   if (l || r || j || s || start) audioInit(false);
+  if (ED.open) {                                         // Editor: Kreuz/Stick wählt und ändert, A weiter/bestätigen, B abbrechen, Start = fertig
+    if (up && !pad.up) edNav('up'); if (down && !pad.down) edNav('down');
+    if (l && !pad.left) edNav('left'); if (r && !pad.right) edNav('right');
+    if (j && !pad.ok) edNav('ok'); if (back && !pad.back) edNav('back');
+    if (start && !pad.start && edLate()) edClose(true);
+    Object.assign(pad, { start, select, up, down, left: l, right: r, ok: j, back });
+    return;
+  }
+  Object.assign(pad, { left: l, right: r, ok: j, back });
   setKey(2, 'left', l); setKey(2, 'right', r); setKey(2, 'jump', j); setKey(2, 'spin', s);
   if (start && !pad.start) { if (G.state === 'play' || G.state === 'pause') togglePause(); else confirm(); }
   if (select && !pad.select) restartLevel();
@@ -2391,6 +2596,13 @@ function boot() {
   resize();
 
   window.addEventListener('keydown', e => {
+    if (ED.open) {                                         // Editor: Pfeile wählen und ändern, Enter bestätigt
+      const nav = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Enter: 'ok', NumpadEnter: 'ok', Space: 'ok' }[e.code];
+      const onButton = document.activeElement && document.activeElement.tagName === 'BUTTON';   // mit Tab angesteuert: Enter gehört dem Knopf
+      if (e.code === 'Escape') { e.preventDefault(); edClose(false); }
+      else if (nav && !(nav === 'ok' && onButton) && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); if (nav !== 'ok' || !e.repeat) edNav(nav); }
+      return;
+    }
     if (HS.open) { if (e.code === 'Escape') { e.preventDefault(); hsClose(); } return; }   // Tasten gehören jetzt dem Namensfeld
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (G.state === 'pause' && /^(ArrowUp|ArrowDown|KeyW|KeyS)$/.test(e.code)) {            // im Pausenmenü wählen ↑ ↓ den Eintrag
@@ -2405,6 +2617,7 @@ function boot() {
     if (k) setKey(0, k, true);
     else if (e.code === 'Enter' || e.code === 'NumpadEnter') confirm();
     else if (e.code === 'Escape' && G.state === 'select') setState('title');
+    else if (e.code === 'KeyE' && G.state === 'select') { pickHero(CUSTOM); edOpen(); }
     else if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
     else if (e.code === 'KeyM') toggleMute();
     else if (e.code === 'KeyR') restartLevel();
@@ -2423,12 +2636,18 @@ function boot() {
   window.addEventListener('gamepaddisconnected', () => { G.toast = 'Gamepad getrennt'; G.toastT = 3; });
 
   const heroUnder = e => { const r = canvas.getBoundingClientRect(); return heroAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
+  const editUnder = e => { const r = canvas.getBoundingClientRect(); return editAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
   const menuUnder = e => { const r = canvas.getBoundingClientRect(); return menuAt((e.clientX - r.left) * LW / r.width, (e.clientY - r.top) * LH / r.height); };
   canvas.addEventListener('pointerdown', e => {
     e.preventDefault(); audioInit();
     if (!document.hasFocus()) window.focus();             // eingebettet: sonst kämen danach keine Tasten an
     if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0 && !HS.open) { G.menu = i; MENU[i][1](); } }   // nur die Knöpfe zählen
-    else if (G.state === 'select') { const i = heroUnder(e); if (i >= 0) { pickHero(i); confirm(); } }   // Figur antippen: wählen und los
+    else if (G.state === 'select') {
+      const i = heroUnder(e);
+      if (HS.open) { /* Editor oder Bestenliste liegt darüber */ }
+      else if (editUnder(e)) { pickHero(CUSTOM); if (G.stateT > TITLE_HOLD) edOpen(); }
+      else if (i >= 0) { pickHero(i); confirm(); }        // Figur antippen: wählen und los (oder erst gestalten)
+    }
     else if (G.state !== 'play') confirm();
   });
   canvas.addEventListener('pointermove', e => { if (G.state === 'pause') { const i = menuUnder(e); if (i >= 0) G.menu = i; } });
@@ -2488,6 +2707,7 @@ function boot() {
   const pauseBtn = document.getElementById('pauseBtn');
   if (pauseBtn) pauseBtn.addEventListener('pointerdown', e => { e.preventDefault(); if (G.state === 'play' || G.state === 'pause') togglePause(); else confirm(); });
   hsInit();
+  edInit();
   const muteBtn = document.getElementById('muteBtn');
   if (muteBtn) muteBtn.addEventListener('pointerdown', e => { e.preventDefault(); audioInit(); toggleMute(); });
   // Vollbild – als Knopf (Touch und Maus) und mit der Taste F. Eingebettet in eine fremde Seite geht das nur, wenn
@@ -2536,6 +2756,7 @@ function boot() {
 // Für Tests und zum Basteln in der Konsole
 globalThis.KJ = {
   G, input, LEVEL_DEFS, buildLevel, makePlayer, stepPlayer, tileAt, update, render, startLevel, showTitle, confirm, setKey,
+  ED, LOOKS, LOOK_OPTS, applyLook, cleanLook, renderSkater, skaterPose, edOpen, edClose, edNav, pollGamepads,
   SONG_SRC, buildSong, textW, music: MUS, tune: TUNE, clap: CLAP, DANCE_T, BOW_T,
   consts: { TILE, ROWS, VIEW_W, VIEW_H, PW, PH, MAX_RUN, STEP, GROUND, BLOCK, PLAT, EMPTY },
 };
