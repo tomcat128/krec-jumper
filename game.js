@@ -477,19 +477,28 @@ const heroAt = (x, y) => (y > 46 && y < 226 && Math.abs(x - LW / 2) < HERO_GAP *
 const editAt = (x, y) => !!G.custom && y > 52 && y < 80 && Math.abs(x - heroX(CUSTOM)) < 64;
 
 // ── Die eigene Figur: Auswahlmöglichkeiten des Editors ──
+const CLOTH = ['#ff3f86', '#e23b3b', '#ff8a1a', '#f2c01e', '#35b558', '#19c7b5', '#3a7be0', '#7446d8', '#2e2a48', '#eef0fa'];   // Stofffarben
+const CLOTH_DARK = 8;                                    // das dunkle Blauschwarz – Vorschlag für die Hose zum Anzug
 const LOOK_OPTS = [
   { key: 'g', label: 'Geschlecht', names: ['Mädchen', 'Junge'] },
-  { key: 'style', label: 'Frisur', names: ['Zopf', 'Kurz', 'Dutt', 'Lang', 'Zöpfe', 'Locken'] },
+  { key: 'style', label: 'Frisur', names: ['Zopf', 'Kurz', 'Dutt', 'Lang', 'Zöpfe', 'Locken', 'Schnecken'] },
   { key: 'skin', label: 'Hautfarbe', colors: ['#fde0c4', '#f6bb92', '#e2a878', '#c68652', '#9a5f38', '#6b3f26'] },
+  { key: 'eye', label: 'Augenfarbe', colors: [INK, '#168a45', '#2468dc'] },   // Schwarz, Grün, Blau
   { key: 'hair', label: 'Haarfarbe', colors: ['#6f3520', '#3a2418', '#1c1a22', '#e8c860', '#d2552a', '#b9bcc8', '#ff5fa8', '#3aa0e0'] },
   { key: 'suit', label: 'Kleidung', names: ['Kleid', 'Anzug'] },
-  { key: 'dress', label: 'Farbe Kleid / Weste', colors: ['#ff3f86', '#e23b3b', '#ff8a1a', '#f2c01e', '#35b558', '#19c7b5', '#3a7be0', '#7446d8', '#2e2a48', '#eef0fa'] },
+  { key: 'top', label: 'Oberteil', colors: CLOTH },                       // Kleid: das Oberteil – Anzug: die Weste
+  { key: 'bottom', label: 'Unterteil', colors: CLOTH },                   // Kleid: der Rock – Anzug: die Hose
+  { key: 'belt', label: 'Gürtel', colors: ['#ffd23f', '#eef0fa', '#2e2a48', '#ff3f86', '#e23b3b', '#19c7b5', '#3a7be0', '#7446d8'] },
   { key: 'boot', label: 'Rollschuhe', colors: ['#e4e8f6', '#34304e', '#ff3f86', '#19c7b5', '#ffd23f', '#7446d8', '#e23b3b'] },
+  { key: 'stop', label: 'Stopper', colors: CLOTH },
 ];
-const LOOK_DEFAULT = { g: 0, style: 3, skin: 1, hair: 3, suit: 0, dress: 0, boot: 3 };
+const LOOK_DEFAULT = { g: 0, style: 3, skin: 1, eye: 0, hair: 3, suit: 0, top: 0, bottom: 0, belt: 0, boot: 3, stop: 0 };
 // Prüft gespeicherte Angaben – alles Unbekannte fällt auf den Vorschlag zurück
 function cleanLook(raw) {
   if (!raw || typeof raw !== 'object') return null;
+  // Früher gab es nur eine Farbe für Kleid bzw. Weste (dress): daraus werden Oberteil, Unterteil und Stopper,
+  // damit eine schon gestaltete Figur genauso aussieht wie vorher (die Hose zum Anzug war dunkel).
+  if (raw.top === undefined && Number.isInteger(raw.dress)) raw = { ...raw, top: raw.dress, bottom: raw.suit === 1 ? CLOTH_DARK : raw.dress, stop: raw.dress };
   const o = {};
   for (const opt of LOOK_OPTS) {
     const n = (opt.names || opt.colors).length, v = raw[opt.key];
@@ -1133,7 +1142,11 @@ defMat('cSkin', '#ffe3c8', '#f6bb92', '#cf8562');
 defMat('cTights', '#fbd3b4', '#eba57e', '#bd7355');
 defMat('cHair', '#a85a30', '#6f3520', '#431d13');
 defMat('cBoot', '#ffffff', '#e4e8f6', '#a4abca');
-defMat('cDress', '#ff8fb8', '#ff3f86', '#b5175a');
+defMat('cTop', '#ff8fb8', '#ff3f86', '#b5175a');
+defMat('cBottom', '#ff8fb8', '#ff3f86', '#b5175a');
+defMat('cBelt', '#fff5ad', '#ffd23f', '#c48c14');
+defMat('cStop', '#ff8fb8', '#ff3f86', '#b5175a');
+defMat('cEye', INK, INK, INK);
 defMat('ink', INK, INK, INK);
 defMat('white', '#ffffff', '#ffffff', '#d8dcec');
 defMat('cone', '#ffb066', '#ff7a1a', '#c44a08');
@@ -1146,11 +1159,12 @@ defMat('birdDark', '#8794ab', '#5d6a80', '#3f4a5e');
 defMat('beak', '#ffc35a', '#ff9f1a', '#c26a08');
 defMat('neck', '#9be6bf', '#5fc795', '#3a8f69');
 const C_INK = M.ink + 1, C_WHITE = M.white;
-// Aussehen je Figur: Körperbau, Kleidung, Frisur (Reihenfolge wie im Editor) und Farben
+// Aussehen je Figur: Körperbau, Kleidung, Frisur (Reihenfolge wie im Editor) und Farben.
+// top = Oberteil bzw. Weste, bottom = Rock bzw. Hose, belt = Gürtel, stop = Stopper vorn am Rollschuh, eye = Augen (Farbnummer)
 const LOOKS = [
-  { man: false, suit: false, style: 0, skin: M.skin, tights: M.tights, boot: M.boot, hair: M.hair, dress: M.dress },
-  { man: true, suit: true, style: 1, skin: M.skin, tights: M.tights, boot: M.bootM, hair: M.hairM, dress: M.dress },
-  { man: false, suit: false, style: 3, skin: M.cSkin, tights: M.cTights, boot: M.cBoot, hair: M.cHair, dress: M.cDress },
+  { man: false, suit: false, style: 0, skin: M.skin, tights: M.tights, boot: M.boot, hair: M.hair, top: M.dress, bottom: M.dress, belt: M.gold, stop: M.dress, eye: C_INK },
+  { man: true, suit: true, style: 1, skin: M.skin, tights: M.tights, boot: M.bootM, hair: M.hairM, top: M.dress, bottom: M.pants, belt: M.gold, stop: M.dress, eye: C_INK },
+  { man: false, suit: false, style: 3, skin: M.cSkin, tights: M.cTights, boot: M.cBoot, hair: M.cHair, top: M.cTop, bottom: M.cBottom, belt: M.cBelt, stop: M.cStop, eye: M.cEye + 1 },
 ];
 // Helle und dunkle Stufe zu einer Grundfarbe: k > 0 mischt Weiß bei, k < 0 Schwarz
 function shadeOf(hex, k) { const t = k > 0 ? 255 : 0, a = Math.abs(k); return hexRgb(hex).map(v => Math.round(v + (t - v) * a)); }
@@ -1163,7 +1177,9 @@ function applyLook(cfg) {
   setMat('cTights', '#' + leg.map(v => v.toString(16).padStart(2, '0')).join(''), 0.3);
   setMat('cHair', col('hair'), 0.3, -0.4);
   setMat('cBoot', col('boot'), cfg.boot === 0 ? 1 : 0.35);
-  setMat('cDress', col('dress'), col('dress') === '#eef0fa' ? 1 : 0.42);
+  for (const [mat, key] of [['cTop', 'top'], ['cBottom', 'bottom'], ['cStop', 'stop']]) setMat(mat, col(key), col(key) === '#eef0fa' ? 1 : 0.42);
+  setMat('cEye', col('eye'), 0, -0.2);
+  setMat('cBelt', col('belt'), col('belt') === '#eef0fa' ? 1 : 0.5, -0.25);
 }
 const LX = -0.45, LY = -0.62, LZ = 0.64;                 // Licht von links oben vorn
 
@@ -1370,7 +1386,7 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
   const rs = rasters().skater, L = LOOKS[who] || LOOKS[0], man = L.man, suit = L.suit;
   rsBegin(rs, yaw, roll, 14);
   const hip = P.hip, chest = P.chest, H = vadd(chest, P.head), F = P.flare;
-  const legMat = suit ? M.pants : L.tights, bootMat = L.boot, hairMat = L.hair, skin = L.skin, dress = L.dress;
+  const legMat = suit ? L.bottom : L.tights, bootMat = L.boot, hairMat = L.hair, skin = L.skin, top = L.top, bottom = L.bottom;
   for (const side of [-1, 1]) {
     const foot = side > 0 ? P.fa : P.fb, dir = vnorm(side > 0 ? P.da : P.db), id = side > 0 ? 2 : 1;
     const hp = [hip[0], hip[1], side * 1.3];
@@ -1381,28 +1397,28 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
     rsCap(rs, vmad(vmad(foot, dir, -0.5), n, -0.2), vmad(vmad(foot, dir, 1.9), n, -0.7), 1.5, 1.35, bootMat, id);
     rsSph(rs, vmad(foot, n, 1.0), 1.4, bootMat, id);
     for (const w of [-0.9, 1.9]) for (const zz of [-0.8, 0.8]) rsSph(rs, vadd(vmad(vmad(foot, dir, w), n, -2.25), [0, 0, zz]), 1.05, M.wheel, id);
-    rsSph(rs, vmad(vmad(foot, dir, 3.1), n, -1.5), 0.8, dress, id);
+    rsSph(rs, vmad(vmad(foot, dir, 3.1), n, -1.5), 0.8, L.stop, id);
   }
   const waist = vmad(hip, [chest[0] - hip[0], chest[1] - hip[1], 0], 0.42);
   if (suit) {
     // Hose bis zur Taille, darüber die Weste mit Goldgürtel; am Hals schaut der Hemdkragen heraus
-    rsSph(rs, [hip[0], hip[1] + 0.3, 0], man ? 2.75 : 2.6, M.pants, 3, 0.95);
-    rsCap(rs, [hip[0], hip[1] + 1.4, 0], chest, man ? 2.55 : 2.4, man ? 3.0 : 2.75, dress, 3);
-    rsSph(rs, waist, man ? 2.8 : 2.65, M.gold, 3, 0.4);
+    rsSph(rs, [hip[0], hip[1] + 0.3, 0], man ? 2.75 : 2.6, bottom, 3, 0.95);
+    rsCap(rs, [hip[0], hip[1] + 1.4, 0], chest, man ? 2.55 : 2.4, man ? 3.0 : 2.75, top, 3);
+    rsSph(rs, waist, man ? 2.8 : 2.65, L.belt, 3, 0.4);
     rsSph(rs, vadd(chest, [0.5, 1.9, 0]), 1.7, M.shirt, 3, 0.8);
   } else {
     // Rumpf, Röckchen (fliegt bei Drehungen nach außen), Gürtel
-    rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, dress, 3);
-    rsSph(rs, [hip[0] - lag, hip[1] - 0.9 + F * 0.5, 0], 4.3 + F * 1.9, dress, 3, 1.0);
-    rsSph(rs, [hip[0] - lag * 0.5, hip[1] + 0.2, 0], 3.7 + F * 1.0, dress, 3, 1.1);
-    rsSph(rs, [hip[0], hip[1] + 1.3, 0], 3.1 + F * 0.3, dress, 3, 1.2);
-    rsSph(rs, waist, 2.85, M.gold, 3, 0.55);
+    rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, top, 3);
+    rsSph(rs, [hip[0] - lag, hip[1] - 0.9 + F * 0.5, 0], 4.3 + F * 1.9, bottom, 3, 1.0);
+    rsSph(rs, [hip[0] - lag * 0.5, hip[1] + 0.2, 0], 3.7 + F * 1.0, bottom, 3, 1.1);
+    rsSph(rs, [hip[0], hip[1] + 1.3, 0], 3.1 + F * 0.3, bottom, 3, 1.2);
+    rsSph(rs, waist, 2.85, L.belt, 3, 0.55);
   }
   for (const side of [-1, 1]) {
     const hand = side > 0 ? P.ha : P.hb, id = side > 0 ? 5 : 4;
     const shd = [chest[0], chest[1] + 0.5, side * (man ? 2.9 : 2.6)];
     const el = ik3(shd, hand, 4, 4, [-0.7, -0.6, side * 0.9]);
-    rsSph(rs, shd, man ? 1.6 : 1.45, suit ? M.shirt : dress, 3);
+    rsSph(rs, shd, man ? 1.6 : 1.45, suit ? M.shirt : top, 3);
     rsCap(rs, shd, el, man ? 1.25 : 1.1, man ? 1.15 : 1.0, suit ? M.shirt : skin, id);   // zum Anzug gehören lange Hemdärmel
     rsCap(rs, el, hand, man ? 1.15 : 1.0, man ? 1.05 : 0.95, suit ? M.shirt : skin, id);
     rsSph(rs, hand, 1.2, skin, id);
@@ -1442,6 +1458,9 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
         rsSph(rs, vadd(H, [-0.4, -0.6, s * 3.3]), 1.6, hairMat, 7);
       }
       break;
+    case 6:                                                                                // zwei Schnecken – runde Dutts seitlich über den Ohren
+      for (const s of [-1, 1]) rsSph(rs, vadd(H, [-0.5, 0.2, s * 3.7]), 2.3, hairMat, 8);
+      break;
     default: {                                                                             // Pferdeschwanz
       const B = vadd(H, [-2.7, 2.6, 0]);
       rsSph(rs, B, 1.2, M.gold, 8);
@@ -1449,7 +1468,7 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
       rsCap(rs, vmad(B, td, 3.4), vadd(vmad(B, td, 5.4), [0, -0.7, 0]), 1.35, 0.8, hairMat, 7);
     }
   }
-  for (const s of [-1, 1]) rsDecal(rs, vadd(H, [3.2, 0.9, s * 1.9]), [[0, 0, C_INK], [0, 1, C_INK]], 6);
+  for (const s of [-1, 1]) rsDecal(rs, vadd(H, [3.2, 0.9, s * 1.9]), [[0, 0, L.eye], [0, 1, L.eye]], 6);
   return rsFinish(rs, flash);
 }
 
@@ -2382,7 +2401,7 @@ async function hsSubmit() {
 // Wie die Bestenliste ein HTML-Fenster über dem Spiel; die Vorschau rendert dieselbe Figur wie im Spiel.
 // Bedienung: antippen/anklicken – oder mit Pfeiltasten bzw. Gamepad: ↑ ↓ wählt den Punkt, ← → ändert ihn.
 // Unter den Punkten liegt die Zeile mit „Fertig" und „Abbrechen" (row = LOOK_OPTS.length, btn = 0/1).
-const ED = { open: false, draft: null, openedAt: 0, row: 0, btn: 0 };
+const ED = { open: false, draft: null, openedAt: 0, row: 0, btn: 0, autoBottom: false };
 const edLate = () => performance.now() - ED.openedAt > 350;   // der Tastendruck oder Tipp, der den Editor geöffnet hat, zählt nicht mit
 function edMark() {
   document.querySelectorAll('#edOpts button').forEach(b => { b.setAttribute('aria-pressed', String(ED.draft[b.dataset.key] === +b.dataset.v)); });
@@ -2391,7 +2410,18 @@ function edMark() {
   byId('edOk').classList.toggle('cur', onBtns && ED.btn === 0);
   byId('edCancel').classList.toggle('cur', onBtns && ED.btn === 1);
 }
-function edSet(key, v) { ED.draft[key] = v; applyLook(ED.draft); edMark(); sfx('card'); }
+function edSet(key, v) {
+  const d = ED.draft, was = d[key];
+  d[key] = v;
+  // Wer von Kleid auf Anzug wechselt, bekommt zunächst eine dunkle Hose statt einer in der Farbe des Oberteils –
+  // und beim Zurückwechseln wieder den passenden Rock. Sobald das Unterteil eigens gewählt wird, bleibt es dabei.
+  if (key === 'bottom') ED.autoBottom = false;
+  else if (key === 'suit' && v !== was) {
+    if (v === 1 && d.bottom === d.top) { d.bottom = CLOTH_DARK; ED.autoBottom = true; }
+    else if (v === 0 && ED.autoBottom) { d.bottom = d.top; ED.autoBottom = false; }
+  }
+  applyLook(d); edMark(); sfx('card');
+}
 // what: up, down, left, right, ok, back
 function edNav(what) {
   if (!ED.open || !edLate()) return;
@@ -2420,7 +2450,7 @@ function edOpen() {
   if (typeof document === 'undefined' || !byId('ed') || HS.open) return;
   clearSource(0); clearSource(1);
   document.querySelectorAll('#touch .on').forEach(b => b.classList.remove('on'));
-  ED.draft = { ...(G.custom || LOOK_DEFAULT) }; ED.row = 0; ED.btn = 0;
+  ED.draft = { ...(G.custom || LOOK_DEFAULT) }; ED.row = 0; ED.btn = 0; ED.autoBottom = false;
   applyLook(ED.draft);
   HS.open = true; ED.open = true; ED.openedAt = performance.now();   // HS.open sperrt die Spieleingabe
   byId('ed').hidden = false;
