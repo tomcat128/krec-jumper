@@ -1261,6 +1261,18 @@ function rsDecal(rs, p, cells, id) {
     if (rs.col[i] && z >= rs.z[i]) { rs.col[i] = col; rs.z[i] = z; rs.id[i] = id; }
   }
 }
+// Auge der Läuferfiguren: so groß wie bisher (1 × 2 Spritepixel), aber weiß mit der Augenfarbe als Pupille in der Mitte.
+// Gezeichnet wird im feinen Raster – bei doppelter Feinheit also 2 × 4 Punkte: oben und unten je eine weiße Zeile.
+function rsEye(rs, p, col, id) {
+  const q = rsT(rs, p), S = rs.size, k = rs.s, bx = Math.floor(q[0]), by = Math.floor(q[1]), z = q[2] + 0.7 * k;
+  const h = 2 * k, p0 = Math.max(1, Math.floor(k / 2)), p1 = h - p0;
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < k; dx++) {
+    const x = bx + dx, y = by + dy;
+    if (x < 0 || y < 0 || x >= S || y >= S) continue;
+    const i = y * S + x;
+    if (rs.col[i] && z >= rs.z[i]) { rs.col[i] = k > 1 && (dy < p0 || dy >= p1) ? C_WHITE : col; rs.z[i] = z; rs.id[i] = id; }
+  }
+}
 function rsFinish(rs, flash) {
   const S = rs.size, col = rs.col, z = rs.z, id = rs.id, d = rs.img.data;
   const darken = k => { const c = col[k]; col[k] = c - ((c - 1) % 3) + 2; };
@@ -1483,7 +1495,7 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
       rsCap(rs, vmad(B, td, 3.4), vadd(vmad(B, td, 5.4), [0, -0.7, 0]), 1.35, 0.8, hairMat, 7);
     }
   }
-  for (const s of [-1, 1]) rsDecal(rs, vadd(H, [3.2, 0.9, s * 1.9]), [[0, 0, L.eye], [0, 1, L.eye]], 6);
+  for (const s of [-1, 1]) rsEye(rs, vadd(H, [3.2, 0.9, s * 1.9]), L.eye, 6);
   return rsFinish(rs, flash);
 }
 
