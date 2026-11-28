@@ -479,6 +479,8 @@ const editAt = (x, y) => !!G.custom && y > 52 && y < 80 && Math.abs(x - heroX(CU
 // ── Die eigene Figur: Auswahlmöglichkeiten des Editors ──
 const CLOTH = ['#ff3f86', '#e23b3b', '#ff8a1a', '#f2c01e', '#35b558', '#19c7b5', '#3a7be0', '#7446d8', '#2e2a48', '#eef0fa'];   // Stofffarben
 const CLOTH_DARK = 8;                                    // das dunkle Blauschwarz – Vorschlag für die Hose zum Anzug
+// Arme und Strümpfe: zuerst „hautfarben" (bloße Arme bzw. hautfarbene Strumpfhose), danach die Stofffarben
+const SKIN_OR_CLOTH = ['skin', ...CLOTH], ARM_WHITE = 1 + CLOTH.indexOf('#eef0fa');   // weiße Hemdärmel – Vorschlag zum Anzug
 const LOOK_OPTS = [
   { key: 'g', label: 'Geschlecht', names: ['Mädchen', 'Junge'] },
   { key: 'style', label: 'Frisur', names: ['Zopf', 'Kurz', 'Dutt', 'Lang', 'Zöpfe', 'Locken', 'Schnecken'] },
@@ -487,18 +489,22 @@ const LOOK_OPTS = [
   { key: 'hair', label: 'Haarfarbe', colors: ['#6f3520', '#3a2418', '#1c1a22', '#e8c860', '#d2552a', '#b9bcc8', '#ff5fa8', '#3aa0e0'] },
   { key: 'suit', label: 'Kleidung', names: ['Kleid', 'Anzug'] },
   { key: 'top', label: 'Oberteil', colors: CLOTH },                       // Kleid: das Oberteil – Anzug: die Weste
+  { key: 'arm', label: 'Arme', colors: SKIN_OR_CLOTH },                   // bloße Arme oder Ärmel in einer Farbe
   { key: 'bottom', label: 'Unterteil', colors: CLOTH },                   // Kleid: der Rock – Anzug: die Hose
+  { key: 'tights', label: 'Strümpfe (zum Kleid)', colors: SKIN_OR_CLOTH },   // die Beine unter dem Rock
   { key: 'belt', label: 'Gürtel', colors: ['#ffd23f', '#eef0fa', '#2e2a48', '#ff3f86', '#e23b3b', '#19c7b5', '#3a7be0', '#7446d8'] },
   { key: 'boot', label: 'Rollschuhe', colors: ['#e4e8f6', '#34304e', '#ff3f86', '#19c7b5', '#ffd23f', '#7446d8', '#e23b3b'] },
+  { key: 'wheel', label: 'Rollen', colors: ['#19c7b5', '#ff3f86', '#e23b3b', '#ff8a1a', '#ffd23f', '#35b558', '#3a7be0', '#7446d8', '#2e2a48', '#eef0fa'] },
   { key: 'stop', label: 'Stopper', colors: CLOTH },
 ];
-const LOOK_DEFAULT = { g: 0, style: 3, skin: 1, eye: 0, hair: 3, suit: 0, top: 0, bottom: 0, belt: 0, boot: 3, stop: 0 };
+const LOOK_DEFAULT = { g: 0, style: 3, skin: 1, eye: 0, hair: 3, suit: 0, top: 0, arm: 0, bottom: 0, tights: 0, belt: 0, boot: 3, wheel: 0, stop: 0 };
 // Prüft gespeicherte Angaben – alles Unbekannte fällt auf den Vorschlag zurück
 function cleanLook(raw) {
   if (!raw || typeof raw !== 'object') return null;
   // Früher gab es nur eine Farbe für Kleid bzw. Weste (dress): daraus werden Oberteil, Unterteil und Stopper,
   // damit eine schon gestaltete Figur genauso aussieht wie vorher (die Hose zum Anzug war dunkel).
   if (raw.top === undefined && Number.isInteger(raw.dress)) raw = { ...raw, top: raw.dress, bottom: raw.suit === 1 ? CLOTH_DARK : raw.dress, stop: raw.dress };
+  if (raw.arm === undefined) raw = { ...raw, arm: raw.suit === 1 ? ARM_WHITE : 0 };   // bisher: zum Anzug weiße Hemdärmel, zum Kleid bloße Arme
   const o = {};
   for (const opt of LOOK_OPTS) {
     const n = (opt.names || opt.colors).length, v = raw[opt.key];
@@ -1147,6 +1153,8 @@ defMat('cBottom', '#ff8fb8', '#ff3f86', '#b5175a');
 defMat('cBelt', '#fff5ad', '#ffd23f', '#c48c14');
 defMat('cStop', '#ff8fb8', '#ff3f86', '#b5175a');
 defMat('cEye', INK, INK, INK);
+defMat('cArm', '#ffe3c8', '#f6bb92', '#cf8562');
+defMat('cWheel', '#8ff5e6', '#19c7b5', '#0b7d76');
 defMat('ink', INK, INK, INK);
 defMat('white', '#ffffff', '#ffffff', '#d8dcec');
 defMat('cone', '#ffb066', '#ff7a1a', '#c44a08');
@@ -1160,11 +1168,12 @@ defMat('beak', '#ffc35a', '#ff9f1a', '#c26a08');
 defMat('neck', '#9be6bf', '#5fc795', '#3a8f69');
 const C_INK = M.ink + 1, C_WHITE = M.white;
 // Aussehen je Figur: Körperbau, Kleidung, Frisur (Reihenfolge wie im Editor) und Farben.
-// top = Oberteil bzw. Weste, bottom = Rock bzw. Hose, belt = Gürtel, stop = Stopper vorn am Rollschuh, eye = Augen (Farbnummer)
+// top = Oberteil bzw. Weste, bottom = Rock bzw. Hose, belt = Gürtel, stop = Stopper vorn am Rollschuh, eye = Augen (Farbnummer),
+// arm = Arme (sleeve: mit Ärmeln statt bloß), wheel = Rollen
 const LOOKS = [
-  { man: false, suit: false, style: 0, skin: M.skin, tights: M.tights, boot: M.boot, hair: M.hair, top: M.dress, bottom: M.dress, belt: M.gold, stop: M.dress, eye: C_INK },
-  { man: true, suit: true, style: 1, skin: M.skin, tights: M.tights, boot: M.bootM, hair: M.hairM, top: M.dress, bottom: M.pants, belt: M.gold, stop: M.dress, eye: C_INK },
-  { man: false, suit: false, style: 3, skin: M.cSkin, tights: M.cTights, boot: M.cBoot, hair: M.cHair, top: M.cTop, bottom: M.cBottom, belt: M.cBelt, stop: M.cStop, eye: M.cEye + 1 },
+  { man: false, suit: false, style: 0, skin: M.skin, tights: M.tights, boot: M.boot, hair: M.hair, top: M.dress, bottom: M.dress, belt: M.gold, stop: M.dress, eye: C_INK, arm: M.skin, sleeve: false, wheel: M.wheel },
+  { man: true, suit: true, style: 1, skin: M.skin, tights: M.tights, boot: M.bootM, hair: M.hairM, top: M.dress, bottom: M.pants, belt: M.gold, stop: M.dress, eye: C_INK, arm: M.shirt, sleeve: true, wheel: M.wheel },
+  { man: false, suit: false, style: 3, skin: M.cSkin, tights: M.cTights, boot: M.cBoot, hair: M.cHair, top: M.cTop, bottom: M.cBottom, belt: M.cBelt, stop: M.cStop, eye: M.cEye + 1, arm: M.cArm, sleeve: false, wheel: M.cWheel },
 ];
 // Helle und dunkle Stufe zu einer Grundfarbe: k > 0 mischt Weiß bei, k < 0 Schwarz
 function shadeOf(hex, k) { const t = k > 0 ? 255 : 0, a = Math.abs(k); return hexRgb(hex).map(v => Math.round(v + (t - v) * a)); }
@@ -1173,11 +1182,17 @@ function applyLook(cfg) {
   const L = LOOKS[CUSTOM], col = key => LOOK_OPTS.find(o => o.key === key).colors[cfg[key]];
   L.man = cfg.g === 1; L.suit = cfg.suit === 1; L.style = cfg.style;
   setMat('cSkin', col('skin'));
-  const leg = shadeOf(col('skin'), -0.07);                  // Strumpfhose: einen Hauch dunkler als die Haut
-  setMat('cTights', '#' + leg.map(v => v.toString(16).padStart(2, '0')).join(''), 0.3);
+  const cloth = (mat, hex) => setMat(mat, hex, hex === '#eef0fa' ? 1 : 0.42);
+  if (col('tights') === 'skin') {                           // hautfarbene Strumpfhose: einen Hauch dunkler als die Haut
+    const leg = shadeOf(col('skin'), -0.07);
+    setMat('cTights', '#' + leg.map(v => v.toString(16).padStart(2, '0')).join(''), 0.3);
+  } else cloth('cTights', col('tights'));
+  L.sleeve = col('arm') !== 'skin';
+  if (L.sleeve) cloth('cArm', col('arm')); else setMat('cArm', col('skin'));
+  setMat('cWheel', col('wheel'), col('wheel') === '#eef0fa' ? 1 : 0.5);
   setMat('cHair', col('hair'), 0.3, -0.4);
   setMat('cBoot', col('boot'), cfg.boot === 0 ? 1 : 0.35);
-  for (const [mat, key] of [['cTop', 'top'], ['cBottom', 'bottom'], ['cStop', 'stop']]) setMat(mat, col(key), col(key) === '#eef0fa' ? 1 : 0.42);
+  for (const [mat, key] of [['cTop', 'top'], ['cBottom', 'bottom'], ['cStop', 'stop']]) cloth(mat, col(key));
   setMat('cEye', col('eye'), 0, -0.2);
   setMat('cBelt', col('belt'), col('belt') === '#eef0fa' ? 1 : 0.5, -0.25);
 }
@@ -1396,7 +1411,7 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
     const d = dir[1], n = vnorm([-dir[0] * d, 1 - d * d, -dir[2] * d]);   // „oben" am Rollschuh
     rsCap(rs, vmad(vmad(foot, dir, -0.5), n, -0.2), vmad(vmad(foot, dir, 1.9), n, -0.7), 1.5, 1.35, bootMat, id);
     rsSph(rs, vmad(foot, n, 1.0), 1.4, bootMat, id);
-    for (const w of [-0.9, 1.9]) for (const zz of [-0.8, 0.8]) rsSph(rs, vadd(vmad(vmad(foot, dir, w), n, -2.25), [0, 0, zz]), 1.05, M.wheel, id);
+    for (const w of [-0.9, 1.9]) for (const zz of [-0.8, 0.8]) rsSph(rs, vadd(vmad(vmad(foot, dir, w), n, -2.25), [0, 0, zz]), 1.05, L.wheel, id);
     rsSph(rs, vmad(vmad(foot, dir, 3.1), n, -1.5), 0.8, L.stop, id);
   }
   const waist = vmad(hip, [chest[0] - hip[0], chest[1] - hip[1], 0], 0.42);
@@ -1405,7 +1420,7 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
     rsSph(rs, [hip[0], hip[1] + 0.3, 0], man ? 2.75 : 2.6, bottom, 3, 0.95);
     rsCap(rs, [hip[0], hip[1] + 1.4, 0], chest, man ? 2.55 : 2.4, man ? 3.0 : 2.75, top, 3);
     rsSph(rs, waist, man ? 2.8 : 2.65, L.belt, 3, 0.4);
-    rsSph(rs, vadd(chest, [0.5, 1.9, 0]), 1.7, M.shirt, 3, 0.8);
+    rsSph(rs, vadd(chest, [0.5, 1.9, 0]), 1.7, L.sleeve ? L.arm : M.shirt, 3, 0.8);   // Kragen in der Farbe der Ärmel
   } else {
     // Rumpf, Röckchen (fliegt bei Drehungen nach außen), Gürtel
     rsCap(rs, [hip[0], hip[1] + 0.6, 0], chest, 2.5, 2.7, top, 3);
@@ -1418,9 +1433,9 @@ function renderSkater(P, yaw, roll, flash, tail, lag, who = G.hero) {
     const hand = side > 0 ? P.ha : P.hb, id = side > 0 ? 5 : 4;
     const shd = [chest[0], chest[1] + 0.5, side * (man ? 2.9 : 2.6)];
     const el = ik3(shd, hand, 4, 4, [-0.7, -0.6, side * 0.9]);
-    rsSph(rs, shd, man ? 1.6 : 1.45, suit ? M.shirt : top, 3);
-    rsCap(rs, shd, el, man ? 1.25 : 1.1, man ? 1.15 : 1.0, suit ? M.shirt : skin, id);   // zum Anzug gehören lange Hemdärmel
-    rsCap(rs, el, hand, man ? 1.15 : 1.0, man ? 1.05 : 0.95, suit ? M.shirt : skin, id);
+    rsSph(rs, shd, man ? 1.6 : 1.45, L.sleeve ? L.arm : top, 3);
+    rsCap(rs, shd, el, man ? 1.25 : 1.1, man ? 1.15 : 1.0, L.arm, id);   // bloße Arme oder Ärmel; die Hand bleibt frei
+    rsCap(rs, el, hand, man ? 1.15 : 1.0, man ? 1.05 : 0.95, L.arm, id);
     rsSph(rs, hand, 1.2, skin, id);
   }
   // Kopf und Frisur – Zopf, lange Haare und Zöpfe wehen mit (tail)
@@ -2401,10 +2416,12 @@ async function hsSubmit() {
 // Wie die Bestenliste ein HTML-Fenster über dem Spiel; die Vorschau rendert dieselbe Figur wie im Spiel.
 // Bedienung: antippen/anklicken – oder mit Pfeiltasten bzw. Gamepad: ↑ ↓ wählt den Punkt, ← → ändert ihn.
 // Unter den Punkten liegt die Zeile mit „Fertig" und „Abbrechen" (row = LOOK_OPTS.length, btn = 0/1).
-const ED = { open: false, draft: null, openedAt: 0, row: 0, btn: 0, autoBottom: false };
+const ED = { open: false, draft: null, openedAt: 0, row: 0, btn: 0, autoBottom: false, autoArm: false };
 const edLate = () => performance.now() - ED.openedAt > 350;   // der Tastendruck oder Tipp, der den Editor geöffnet hat, zählt nicht mit
 function edMark() {
   document.querySelectorAll('#edOpts button').forEach(b => { b.setAttribute('aria-pressed', String(ED.draft[b.dataset.key] === +b.dataset.v)); });
+  const skinHex = LOOK_OPTS.find(o => o.key === 'skin').colors[ED.draft.skin];
+  document.querySelectorAll('#edOpts button.skin').forEach(b => { b.style.backgroundColor = skinHex; });   // „hautfarben" zeigt die gewählte Haut
   const onBtns = ED.row === LOOK_OPTS.length;
   document.querySelectorAll('#edOpts .ed-row').forEach((r, i) => { r.classList.toggle('cur', i === ED.row); });
   byId('edOk').classList.toggle('cur', onBtns && ED.btn === 0);
@@ -2415,10 +2432,14 @@ function edSet(key, v) {
   d[key] = v;
   // Wer von Kleid auf Anzug wechselt, bekommt zunächst eine dunkle Hose statt einer in der Farbe des Oberteils –
   // und beim Zurückwechseln wieder den passenden Rock. Sobald das Unterteil eigens gewählt wird, bleibt es dabei.
+  // Genauso die Arme: zum Anzug zunächst weiße Hemdärmel, zum Kleid wieder bloße Arme.
   if (key === 'bottom') ED.autoBottom = false;
+  else if (key === 'arm') ED.autoArm = false;
   else if (key === 'suit' && v !== was) {
     if (v === 1 && d.bottom === d.top) { d.bottom = CLOTH_DARK; ED.autoBottom = true; }
     else if (v === 0 && ED.autoBottom) { d.bottom = d.top; ED.autoBottom = false; }
+    if (v === 1 && d.arm === 0) { d.arm = ARM_WHITE; ED.autoArm = true; }
+    else if (v === 0 && ED.autoArm) { d.arm = 0; ED.autoArm = false; }
   }
   applyLook(d); edMark(); sfx('card');
 }
@@ -2450,7 +2471,7 @@ function edOpen() {
   if (typeof document === 'undefined' || !byId('ed') || HS.open) return;
   clearSource(0); clearSource(1);
   document.querySelectorAll('#touch .on').forEach(b => b.classList.remove('on'));
-  ED.draft = { ...(G.custom || LOOK_DEFAULT) }; ED.row = 0; ED.btn = 0; ED.autoBottom = false;
+  ED.draft = { ...(G.custom || LOOK_DEFAULT) }; ED.row = 0; ED.btn = 0; ED.autoBottom = false; ED.autoArm = false;
   applyLook(ED.draft);
   HS.open = true; ED.open = true; ED.openedAt = performance.now();   // HS.open sperrt die Spieleingabe
   byId('ed').hidden = false;
@@ -2486,7 +2507,8 @@ function edInit() {
       const b = document.createElement('button');
       b.type = 'button'; b.dataset.key = opt.key; b.dataset.v = i;
       if (opt.names) b.textContent = v;
-      else { b.className = 'sw'; b.style.background = v; b.setAttribute('aria-label', `${opt.label} ${i + 1}`); }
+      else if (v === 'skin') { b.className = 'sw skin'; b.setAttribute('aria-label', `${opt.label}: hautfarben`); b.title = 'hautfarben'; }
+      else { b.className = 'sw'; b.style.backgroundColor = v; b.setAttribute('aria-label', `${opt.label} ${i + 1}`); }
       set.appendChild(b);
     });
     row.append(lab, set); box.appendChild(row);
